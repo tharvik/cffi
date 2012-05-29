@@ -397,18 +397,6 @@ static PyObject *cdataowning_repr(CDataObject *cd)
 
 static int cdata_nonzero(CDataObject *cd)
 {
-    if (cd->c_type->ct_flags & CT_PRIMITIVE_ANY) {
-        if (cd->c_type->ct_flags & CT_PRIMITIVE_FLOAT) {
-            double value;
-            value = read_raw_float_data(cd->c_data, cd->c_type->ct_size);
-            return value != 0.0;
-        }
-        else {
-            unsigned PY_LONG_LONG value;
-            value = read_raw_unsigned_data(cd->c_data, cd->c_type->ct_size);
-            return value != 0;
-        }
-    }
     return cd->c_data != NULL;
 }
 
@@ -466,23 +454,7 @@ static PyObject *cdata_richcompare(PyObject *v, PyObject *w, int op)
 
     obv = (CDataObject *)v;
     obw = (CDataObject *)w;
-    if (obv->c_type != obw->c_type) {
-        equal = 0;
-    }
-    else if (obv == obw) {
-        equal = 1;
-    }
-    else if (obv->c_type->ct_flags & CT_PRIMITIVE_FLOAT) {
-        double dv = read_raw_float_data(obv->c_data, obv->c_type->ct_size);
-        double dw = read_raw_float_data(obw->c_data, obw->c_type->ct_size);
-        equal = (dv == dw);
-    }
-    else if (obv->c_type->ct_flags & CT_PRIMITIVE_ANY) {
-        equal = (memcmp(obv->c_data, obw->c_data, obv->c_type->ct_size) == 0);
-    }
-    else
-        equal = 0;
-
+    equal = (obv->c_type == obw->c_type) && (obv->c_data == obw->c_data);
     return (equal ^ (op == Py_NE)) ? Py_True : Py_False;
 
  Unimplemented:
@@ -492,28 +464,7 @@ static PyObject *cdata_richcompare(PyObject *v, PyObject *w, int op)
 
 static long cdata_hash(CDataObject *cd)
 {
-    if (cd->c_type->ct_flags & CT_PRIMITIVE_FLOAT) {
-        double value = read_raw_float_data(cd->c_data, cd->c_type->ct_size);
-        return _Py_HashDouble(value) ^ 0xF00BA/*R*/;
-    }
-    if (cd->c_type->ct_flags & CT_PRIMITIVE_ANY) {
-        long result;
-        unsigned PY_LONG_LONG value;
-        value = read_raw_unsigned_data(cd->c_data, cd->c_type->ct_size);
-
-        result = (long) value;
-#if SIZE_OF_LONG_LONG > SIZE_OF_LONG
-        value >>= (8 * SIZE_OF_LONG);
-        result ^= value * 1000003;
-#endif
-        result = _Py_HashPointer(cd->c_type) + result * 1000003;
-        if (result == -1)
-            result = -2;
-        return result;
-    }
-    else {
-        return _Py_HashPointer(cd);
-    }
+    return _Py_HashPointer(cd->c_type) ^ _Py_HashPointer(cd->c_data);
 }
 
 static Py_ssize_t

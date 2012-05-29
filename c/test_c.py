@@ -37,14 +37,11 @@ def test_cast_to_signed_char():
     x = _ffi_backend.cast(p, -66 + (1<<199)*256)
     assert repr(x) == "<cdata 'signed char'>"
     assert int(x) == -66
-    assert (x == _ffi_backend.cast(p, -66)) is True
-    assert (x == _ffi_backend.cast(p, 66)) is False
-    assert (x != _ffi_backend.cast(p, -66)) is False
-    assert (x != _ffi_backend.cast(p, 66)) is True
+    assert (x == _ffi_backend.cast(p, -66)) is False
+    assert (x != _ffi_backend.cast(p, -66)) is True
     q = _ffi_backend.new_primitive_type(None, "short")
     assert (x == _ffi_backend.cast(q, -66)) is False
     assert (x != _ffi_backend.cast(q, -66)) is True
-    assert hash(x) == hash(_ffi_backend.cast(p, -66))
 
 def test_sizeof_type():
     py.test.raises(TypeError, _ffi_backend.sizeof_type, 42.5)
@@ -80,10 +77,7 @@ def test_float_types():
     INF = 1E200 * 1E200
     for name in ["float", "double"]:
         p = _ffi_backend.new_primitive_type(None, name)
-        assert not bool(_ffi_backend.cast(p, 0))
-        assert not bool(_ffi_backend.cast(p, 0L))
-        assert not bool(_ffi_backend.cast(p, 0.0))
-        assert not bool(_ffi_backend.cast(p, -0.0))
+        assert bool(_ffi_backend.cast(p, 0))
         assert bool(_ffi_backend.cast(p, INF))
         assert bool(_ffi_backend.cast(p, -INF))
         assert int(_ffi_backend.cast(p, -150)) == -150
@@ -102,18 +96,13 @@ def test_float_types():
             assert float(_ffi_backend.cast(p, 1.1)) != 1.1     # rounding error
             assert float(_ffi_backend.cast(p, 1E200)) == INF   # limited range
 
-        assert _ffi_backend.cast(p, -1.1) == _ffi_backend.cast(p, -1.1)
-        assert _ffi_backend.cast(p, -1.1) != _ffi_backend.cast(p, 1.1)
-        assert _ffi_backend.cast(p, -0.0) == _ffi_backend.cast(p, 0.0)
-        assert _ffi_backend.cast(p, -INF) != _ffi_backend.cast(p, INF)
-        assert (hash(_ffi_backend.cast(p, -0.0)) ==
-                hash(_ffi_backend.cast(p, 0.0)))
+        assert _ffi_backend.cast(p, -1.1) != _ffi_backend.cast(p, -1.1)
         assert repr(float(_ffi_backend.cast(p, -0.0))) == '-0.0'
 
 def test_character_type():
     p = _ffi_backend.new_primitive_type(None, "char")
-    assert not bool(_ffi_backend.cast(p, '\x00'))
-    assert _ffi_backend.cast(p, '\x00') == _ffi_backend.cast(p, -17*256)
+    assert bool(_ffi_backend.cast(p, '\x00'))
+    assert _ffi_backend.cast(p, '\x00') != _ffi_backend.cast(p, -17*256)
     assert int(_ffi_backend.cast(p, 'A')) == 65
     assert long(_ffi_backend.cast(p, 'A')) == 65L
     assert type(int(_ffi_backend.cast(p, 'A'))) is int
@@ -140,6 +129,8 @@ def test_pointer_to_int():
     assert repr(p) == "<cdata 'int *' owning %d bytes>" % size_of_int()
     q = _ffi_backend.cast(BPtr, p)
     assert repr(q) == "<cdata 'int *'>"
+    assert p == q
+    assert hash(p) == hash(q)
 
 def test_pointer_to_pointer():
     BInt = _ffi_backend.new_primitive_type(None, "int")
