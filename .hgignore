@@ -1,0 +1,7 @@
+syntax: glob
+*.py[co]
+*~
+.*.swp
+testing/__pycache__
+demo/__pycache__
+doc/build
