@@ -1,0 +1,17 @@
+
+Current status
+--------------
+
+* works as a ctypes replacement
+* can use internally either ctypes or a C extension module
+
+
+Next steps
+----------
+
+the verify() step, which is missing:
+
+* typedef ... some_integer_type;
+
+
+_ffi backend for PyPy
