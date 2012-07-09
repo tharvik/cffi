@@ -1279,6 +1279,101 @@ def test_cast_with_functionptr():
     py.test.raises(TypeError, newp, BStructPtr, [cast(BIntP, 0)])
     py.test.raises(TypeError, newp, BStructPtr, [cast(BFunc2, 0)])
 
+def test_wchar():
+    BWChar = new_primitive_type("wchar_t")
+    pyuni4 = {1: True, 2: False}[len(u'\U00012345')]
+    wchar4 = {2: False, 4: True}[sizeof(BWChar)]
+    assert str(cast(BWChar, 0x45)) == "<cdata 'wchar_t' u'E'>"
+    assert str(cast(BWChar, 0x1234)) == "<cdata 'wchar_t' u'\u1234'>"
+    if wchar4:
+        x = cast(BWChar, 0x12345)
+        assert str(x) == "<cdata 'wchar_t' u'\U00012345'>"
+        assert unicode(x) == u'\U00012345'
+    else:
+        assert not pyuni4
+    #
+    BWCharP = new_pointer_type(BWChar)
+    BStruct = new_struct_type("foo_s")
+    BStructPtr = new_pointer_type(BStruct)
+    complete_struct_or_union(BStruct, [('a1', BWChar, -1),
+                                       ('a2', BWCharP, -1)])
+    s = newp(BStructPtr)
+    s.a1 = u'\x00'
+    assert s.a1 == u'\x00'
+    py.test.raises(TypeError, "s.a1 = 'a'")
+    py.test.raises(TypeError, "s.a1 = '\xFF'")
+    s.a1 = u'\u1234'
+    assert s.a1 == u'\u1234'
+    if pyuni4:
+        assert wchar4
+        s.a1 = u'\U00012345'
+        assert s.a1 == u'\U00012345'
+    elif wchar4:
+        s.a1 = cast(BWChar, 0x12345)
+        assert s.a1 == u'\ud808\udf45'
+        s.a1 = u'\ud807\udf44'
+        assert s.a1 == u'\U00011f44'
+    else:
+        py.test.raises(ValueError, "s.a1 = u'\U00012345'")
+    #
+    BWCharArray = new_array_type(BWCharP, None)
+    a = newp(BWCharArray, u'hello \u1234 world')
+    assert len(a) == 14   # including the final null
+    assert unicode(a) == u'hello \u1234 world'
+    a[13] = u'!'
+    assert unicode(a) == u'hello \u1234 world!'
+    assert str(a) == repr(a)
+    assert a[6] == u'\u1234'
+    a[6] = '-'
+    assert str(a) == 'hello - world'
+    #
+    if wchar4:
+        u = u'\U00012345\U00012346\U00012347'
+        a = newp(BWCharArray, u)
+        assert len(a) == 4
+        assert unicode(a) == u
+        assert len(list(a)) == 4
+        expected = [u'\U00012345', u'\U00012346', u'\U00012347', unichr(0)]
+        assert list(a) == expected
+        got = [a[i] for i in range(4)]
+        assert got == expected
+        py.test.raises(IndexError, 'a[4]')
+    #
+    w = cast(BWChar, 'a')
+    assert repr(w) == "<cdata 'wchar_t' u'a'>"
+    assert str(w) == 'a'
+    assert unicode(w) == u'a'
+    w = cast(BWChar, 0x1234)
+    assert repr(w) == "<cdata 'wchar_t' u'\u1234'>"
+    py.test.raises(xxUnicodeEncodeError, str, w)
+    assert unicode(w) == u'\u1234'
+    assert int(w) == 0x1234
+    #
+    p = cast(BWCharP, a)
+    assert str(p) == 'hello - world'
+    assert unicode(p) == u'hello - world'
+    p[6] = u'\u2345'
+    py.test.raises(xxUnicodeEncodeError, str, p)
+    assert unicode(p) == u'hello \u2345 world'
+    #
+    s = newp(BStructPtr, [u'\u1234', p])
+    assert s.a1 == u'\u1234'
+    assert s.a2 == p
+    py.test.raises(xxUnicodeEncodeError, str, s.a2)
+    assert unicode(s.a2) == u'hello \u2345 world'
+    #
+    q = cast(BWCharP, 0)
+    py.test.raises(RuntimeError, str, q)
+    py.test.raises(RuntimeError, unicode, q)
+    #
+    BInt = new_primitive_type("int")
+    def cb(p):
+        assert repr(p).startswith("<cdata 'wchar_t *' 0x")
+        return len(unicode(p))
+    BFunc = new_function_type((BWCharP,), BInt, False)
+    f = callback(BFunc, cb, -42)
+    assert f(u'a\u1234b') == 3
+
 def test_keepalive_struct():
     # exception to the no-keepalive rule: p=newp(BStructPtr) returns a
     # pointer owning the memory, and p[0] returns a pointer to the

@@ -27,7 +27,7 @@
 /* base type flag: exactly one of the following: */
 #define CT_PRIMITIVE_SIGNED   1    /* signed integer */
 #define CT_PRIMITIVE_UNSIGNED 2    /* unsigned integer */
-#define CT_PRIMITIVE_CHAR     4    /* char (and, later, wchar_t) */
+#define CT_PRIMITIVE_CHAR     4    /* char, wchar_t */
 #define CT_PRIMITIVE_FLOAT    8    /* float, double */
 #define CT_POINTER           16    /* pointer, excluding ptr-to-func */
 #define CT_ARRAY             32    /* array */
@@ -155,6 +155,10 @@ static void init_errno(void) { }
 # else
 #  include "misc_thread.h"
 # endif
+#endif
+
+#ifdef HAVE_WCHAR_H
+# include "wchar_helper.h"
 #endif
 
 /************************************************************/
@@ -602,7 +606,12 @@ convert_to_object(char *data, CTypeDescrObject *ct)
         return PyFloat_FromDouble(value);
     }
     else if (ct->ct_flags & CT_PRIMITIVE_CHAR) {
-        return PyString_FromStringAndSize(data, 1);
+        if (ct->ct_size == sizeof(char))
+            return PyString_FromStringAndSize(data, 1);
+#ifdef HAVE_WCHAR_H
+        else
+            return _my_PyUnicode_FromWideChar((wchar_t *)data, 1);
+#endif
     }
 
     PyErr_Format(PyExc_SystemError,
@@ -664,14 +673,35 @@ static int _convert_to_char(PyObject *init)
         return (unsigned char)(PyString_AS_STRING(init)[0]);
     }
     if (CData_Check(init) &&
-           (((CDataObject *)init)->c_type->ct_flags & CT_PRIMITIVE_CHAR)) {
-        return (unsigned char)(((CDataObject *)init)->c_data[0]);
+           (((CDataObject *)init)->c_type->ct_flags & CT_PRIMITIVE_CHAR) &&
+           (((CDataObject *)init)->c_type->ct_size == sizeof(char))) {
+        return *(unsigned char *)((CDataObject *)init)->c_data;
     }
     PyErr_Format(PyExc_TypeError,
                  "initializer for ctype 'char' must be a string of length 1, "
                  "not %.200s", Py_TYPE(init)->tp_name);
     return -1;
 }
+
+#ifdef HAVE_WCHAR_H
+static wchar_t _convert_to_wchar_t(PyObject *init)
+{
+    if (PyUnicode_Check(init)) {
+        wchar_t ordinal;
+        if (_my_PyUnicode_AsSingleWideChar(init, &ordinal) == 0)
+            return ordinal;
+    }
+    if (CData_Check(init) &&
+           (((CDataObject *)init)->c_type->ct_flags & CT_PRIMITIVE_CHAR) &&
+           (((CDataObject *)init)->c_type->ct_size == sizeof(wchar_t))) {
+        return *(wchar_t *)((CDataObject *)init)->c_data;
+    }
+    PyErr_Format(PyExc_TypeError,
+                 "initializer for ctype 'wchar_t' must be a unicode string "
+                 "of length 1, not %.200s", Py_TYPE(init)->tp_name);
+    return (wchar_t)-1;
+}
+#endif
 
 static int _convert_error(PyObject *init, const char *ct_name,
                           const char *expected)
@@ -732,24 +762,46 @@ convert_from_object(char *data, CTypeDescrObject *ct, PyObject *init)
             return 0;
         }
         else if (ctitem->ct_flags & CT_PRIMITIVE_CHAR) {
-            char *srcdata;
-            Py_ssize_t n;
-            if (!PyString_Check(init)) {
-                expected = "str or list or tuple";
-                goto cannot_convert;
+            if (ctitem->ct_size == sizeof(char)) {
+                char *srcdata;
+                Py_ssize_t n;
+                if (!PyString_Check(init)) {
+                    expected = "str or list or tuple";
+                    goto cannot_convert;
+                }
+                n = PyString_GET_SIZE(init);
+                if (ct->ct_length >= 0 && n > ct->ct_length) {
+                    PyErr_Format(PyExc_IndexError,
+                                 "initializer string is too long for '%s' "
+                                 "(got %zd characters)", ct->ct_name, n);
+                    return -1;
+                }
+                if (n != ct->ct_length)
+                    n++;
+                srcdata = PyString_AS_STRING(init);
+                memcpy(data, srcdata, n);
+                return 0;
             }
-            n = PyString_GET_SIZE(init);
-            if (ct->ct_length >= 0 && n > ct->ct_length) {
-                PyErr_Format(PyExc_IndexError,
-                             "initializer string is too long for '%s' "
-                             "(got %zd characters)", ct->ct_name, n);
-                return -1;
+#ifdef HAVE_WCHAR_H
+            else {
+                Py_ssize_t n;
+                if (!PyUnicode_Check(init)) {
+                    expected = "unicode or list or tuple";
+                    goto cannot_convert;
+                }
+                n = _my_PyUnicode_SizeAsWideChar(init);
+                if (ct->ct_length >= 0 && n > ct->ct_length) {
+                    PyErr_Format(PyExc_IndexError,
+                                 "initializer unicode is too long for '%s' "
+                                 "(got %zd characters)", ct->ct_name, n);
+                    return -1;
+                }
+                if (n != ct->ct_length)
+                    n++;
+                _my_PyUnicode_AsWideChar(init, (wchar_t *)data, n);
+                return 0;
             }
-            if (n != ct->ct_length)
-                n++;
-            srcdata = PyString_AS_STRING(init);
-            memcpy(data, srcdata, n);
-            return 0;
+#endif
         }
         else {
             expected = "list or tuple";
@@ -829,10 +881,20 @@ convert_from_object(char *data, CTypeDescrObject *ct, PyObject *init)
         return 0;
     }
     if (ct->ct_flags & CT_PRIMITIVE_CHAR) {
-        int res = _convert_to_char(init);
-        if (res < 0)
-            return -1;
-        data[0] = res;
+        if (ct->ct_size == sizeof(char)) {
+            int res = _convert_to_char(init);
+            if (res < 0)
+                return -1;
+            data[0] = res;
+        }
+#ifdef HAVE_WCHAR_H
+        else {
+            wchar_t res = _convert_to_wchar_t(init);
+            if (res == (wchar_t)-1 && PyErr_Occurred())
+                return -1;
+            *(wchar_t *)data = res;
+        }
+#endif
         return 0;
     }
     if (ct->ct_flags & (CT_STRUCT|CT_UNION)) {
@@ -1064,11 +1126,13 @@ static PyObject *cdata_repr(CDataObject *cd)
 
 static PyObject *cdata_str(CDataObject *cd)
 {
-    if (cd->c_type->ct_flags & CT_PRIMITIVE_CHAR) {
+    if (cd->c_type->ct_flags & CT_PRIMITIVE_CHAR &&
+        cd->c_type->ct_size == sizeof(char)) {
         return PyString_FromStringAndSize(cd->c_data, 1);
     }
     else if (cd->c_type->ct_itemdescr != NULL &&
-             cd->c_type->ct_itemdescr->ct_flags & CT_PRIMITIVE_CHAR) {
+             cd->c_type->ct_itemdescr->ct_flags & CT_PRIMITIVE_CHAR &&
+             cd->c_type->ct_itemdescr->ct_size == sizeof(char)) {
         Py_ssize_t length;
 
         if (cd->c_type->ct_flags & CT_ARRAY) {
@@ -1100,6 +1164,47 @@ static PyObject *cdata_str(CDataObject *cd)
     else
         return Py_TYPE(cd)->tp_repr((PyObject *)cd);
 }
+
+#ifdef HAVE_WCHAR_H
+static PyObject *cdata_unicode(CDataObject *cd)
+{
+    if (cd->c_type->ct_flags & CT_PRIMITIVE_CHAR &&
+        cd->c_type->ct_size > sizeof(char)) {
+        return _my_PyUnicode_FromWideChar((wchar_t *)cd->c_data, 1);
+    }
+    else if (cd->c_type->ct_itemdescr != NULL &&
+             cd->c_type->ct_itemdescr->ct_flags & CT_PRIMITIVE_CHAR &&
+             cd->c_type->ct_itemdescr->ct_size > sizeof(char)) {
+        Py_ssize_t length;
+
+        if (cd->c_type->ct_flags & CT_ARRAY) {
+            const wchar_t *start = (wchar_t *)cd->c_data;
+            const Py_ssize_t lenmax = get_array_length(cd);
+            length = 0;
+            while (length < lenmax && start[length])
+                length++;
+        }
+        else {
+            abort();
+            if (cd->c_data == NULL) {
+                PyObject *s = cdata_repr(cd);
+                if (s != NULL) {
+                    PyErr_Format(PyExc_RuntimeError,
+                                 "cannot use str() on %s",
+                                 PyString_AS_STRING(s));
+                    Py_DECREF(s);
+                }
+                return NULL;
+            }
+            length = strlen(cd->c_data);
+        }
+
+        return _my_PyUnicode_FromWideChar((wchar_t *)cd->c_data, length);
+    }
+    else
+        return cdata_repr(cd);
+}
+#endif
 
 static PyObject *cdataowning_repr(CDataObject *cd)
 {
@@ -1645,6 +1750,11 @@ static PyMappingMethods CDataOwn_as_mapping = {
     (objobjargproc)cdata_ass_sub, /*mp_ass_subscript*/
 };
 
+static PyMethodDef CData_methods[] = {
+    {"__unicode__",     (PyCFunction)cdata_unicode,  METH_NOARGS},
+    {NULL,              NULL}           /* sentinel */
+};
+
 static PyTypeObject CData_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     "_cffi_backend.CData",
@@ -1672,6 +1782,8 @@ static PyTypeObject CData_Type = {
     cdata_richcompare,                          /* tp_richcompare */
     0,                                          /* tp_weaklistoffset */
     (getiterfunc)cdata_iter,                    /* tp_iter */
+    0,                                          /* tp_iternext */
+    CData_methods,                              /* tp_methods */
 };
 
 static PyTypeObject CDataOwning_Type = {
@@ -1848,7 +1960,7 @@ static PyObject *b_newp(PyObject *self, PyObject *args)
             return NULL;
         }
         if (ctitem->ct_flags & CT_PRIMITIVE_CHAR)
-            datasize += sizeof(char);  /* forcefully add a null character */
+            datasize *= 2;   /* forcefully add another character: a null */
     }
     else if (ct->ct_flags & CT_ARRAY) {
         dataoffset = offsetof(CDataObject_own_nolength, alignment);
@@ -1860,6 +1972,10 @@ static PyObject *b_newp(PyObject *self, PyObject *args)
             else if (PyString_Check(init)) {
                 /* from a string, we add the null terminator */
                 explicitlength = PyString_GET_SIZE(init) + 1;
+            }
+            else if (PyUnicode_Check(init)) {
+                /* from a unicode, we add the null terminator */
+                explicitlength = PyUnicode_GET_SIZE(init) + 1;
             }
             else {
                 explicitlength = PyNumber_AsSsize_t(init, PyExc_OverflowError);
@@ -2240,7 +2356,6 @@ static PyObject *b_nonstandard_integer_types(PyObject *self, PyObject *noarg)
         { "ptrdiff_t",     sizeof(ptrdiff_t) },
         { "size_t",        sizeof(size_t) | UNSIGNED },
         { "ssize_t",       sizeof(ssize_t) },
-        /*{ "wchar_t",       sizeof(wchar_t) | UNSIGNED },*/
         { NULL }
     };
 #undef UNSIGNED
@@ -2284,10 +2399,17 @@ static PyObject *b_new_primitive_type(PyObject *self, PyObject *args)
        EPTYPE(ull, unsigned long long, CT_PRIMITIVE_UNSIGNED )  \
        EPTYPE(f, float, CT_PRIMITIVE_FLOAT )                    \
        EPTYPE(d, double, CT_PRIMITIVE_FLOAT )
+#ifdef HAVE_WCHAR_H
+# define ENUM_PRIMITIVE_TYPES_WCHAR                             \
+       EPTYPE(wc, wchar_t, CT_PRIMITIVE_CHAR )
+#else
+# define ENUM_PRIMITIVE_TYPES_WCHAR   /* nothing */
+#endif
 
 #define EPTYPE(code, typename, flags)                   \
     struct aligncheck_##code { char x; typename y; };
     ENUM_PRIMITIVE_TYPES
+    ENUM_PRIMITIVE_TYPES_WCHAR
 #undef EPTYPE
 
     CTypeDescrObject *td;
@@ -2301,7 +2423,9 @@ static PyObject *b_new_primitive_type(PyObject *self, PyObject *args)
           flags                                         \
         },
     ENUM_PRIMITIVE_TYPES
+    ENUM_PRIMITIVE_TYPES_WCHAR
 #undef EPTYPE
+#undef ENUM_PRIMITIVE_TYPES_WCHAR
 #undef ENUM_PRIMITIVE_TYPES
         { NULL }
     };
@@ -2592,6 +2716,8 @@ static PyObject *b_complete_struct_or_union(PyObject *self, PyObject *args)
             if (!(ftype->ct_flags & (CT_PRIMITIVE_SIGNED |
                                      CT_PRIMITIVE_UNSIGNED |
                                      CT_PRIMITIVE_CHAR)) ||
+                    ((ftype->ct_flags & CT_PRIMITIVE_CHAR)
+                         && ftype->ct_size > sizeof(char)) ||
                     fbitsize == 0 ||
                     fbitsize > 8 * ftype->ct_size) {
                 PyErr_Format(PyExc_TypeError, "invalid bit field '%s'",
