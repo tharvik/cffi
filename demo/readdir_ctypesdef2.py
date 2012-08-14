@@ -11,14 +11,14 @@ if not sys.platform.startswith('linux'):
     raise Exception("Linux-only demo")
 
 
-DIR = ctypes.OPAQUE          # <--
+DIR = ctypes.OPAQUE()          # <--
 DIR_p = ctypes.POINTER(DIR)
 
 class DIRENT(ctypes.PartialStructure):    # <--
     _fields_ = [
         ('d_type', ctypes.c_ubyte),       # type of file; not supported
                                           #   by all file system types
-        ('d_name', ctypes.c_char * Ellipsis),  # filename
+        ('d_name', ctypes.c_char * Ellipsis),  # <--
         ]
 DIRENT_p = ctypes.POINTER(DIRENT)
 DIRENT_pp = ctypes.POINTER(DIRENT_p)
