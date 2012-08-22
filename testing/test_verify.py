@@ -273,7 +273,7 @@ def test_ffi_full_struct():
     ffi.verify("struct foo_s { char x; int y; long *z; };")
     #
     if sys.platform == 'win32':
-        py.test.skip("XXX fixme: only gives warnings")
+        py.test.skip("XXX fixme: only gives warnings - need to add /WX flag")
     for real in [
         "struct foo_s { char x; int y; int *z; };",
         "struct foo_s { char x; long *z; int y; };",
@@ -346,7 +346,7 @@ def test_struct_signedness_ignored():
 
 def test_struct_float_vs_int():
     if sys.platform == 'win32':
-        py.test.skip("XXX fixme: only gives warnings")
+        py.test.skip("XXX fixme: only gives warnings - need to add /WX flag")
     for typename in all_signed_integer_types:
         for real in all_float_types:
             _check_field_match(typename, real, expect_mismatch=True)
@@ -665,7 +665,7 @@ def test_varargs():
 
 def test_varargs_exact():
     if sys.platform == 'win32':
-        py.test.skip("XXX fixme: only gives warnings")
+        py.test.skip("XXX fixme: only gives warnings - need to add /WX flag")
     ffi = FFI()
     ffi.cdef("int foo(int x, ...);")
     py.test.raises(VerificationError, ffi.verify, """
@@ -809,7 +809,7 @@ def test_enum_as_function_result():
     assert lib.foo_func(lib.BB) == "BB"
 
 def test_callback_calling_convention():
-    py.test.skip("later")
+    py.test.skip("pycparser parses c99 only with no compiler-specific extensions")
     if sys.platform != 'win32':
         py.test.skip("Windows only")
     ffi = FFI()
