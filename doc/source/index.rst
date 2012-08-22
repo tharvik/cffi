@@ -79,6 +79,10 @@ Requirements:
 
 * pycparser 2.06 or 2.07: http://code.google.com/p/pycparser/
   (there is a bug in the distribution of 2.08!)
+  
+  note that pycparser in turn relies on `ply`_
+  
+.. _`ply`: http://pypi.python.org/pypi/ply
 
 * a C compiler is required to use CFFI during development, but not to run
   correctly-installed programs that use CFFI.
