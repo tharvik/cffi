@@ -104,6 +104,8 @@ def test_longdouble():
 def test_longdouble_precision():
     # Test that we don't loose any precision of 'long double' when
     # passing through Python and CFFI.
+    if ffi.sizeof("long double")==ffi.sizeof("double"):
+        py.test.skip('"long double" is no more precise than "double"')
     ffi = FFI()
     ffi.cdef("long double step1(long double x);")
     lib = ffi.verify("""
