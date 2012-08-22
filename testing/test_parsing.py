@@ -1,4 +1,4 @@
-import py, sys
+import py, sys, re
 from cffi import FFI, FFIError, CDefError, VerificationError
 
 class FakeBackend(object):
@@ -177,3 +177,15 @@ def test_override():
     assert C.foo.BType == '<func (), <int>, False>'
     ffi.cdef("long foo(void);", override=True)
     assert C.foo.BType == '<func (), <long>, False>'
+
+def test_cannot_have_only_variadic_part():
+    # this checks that we get a sensible error if we try "int foo(...);"
+    ffi = FFI()
+    e = py.test.raises(CDefError, ffi.cdef, "int foo(...);")
+    assert str(e.value) == \
+           "foo: a function with only '(...)' as argument is not correct C"
+
+def test_parse_error():
+    ffi = FFI()
+    e = py.test.raises(CDefError, ffi.cdef, " x y z ")
+    assert re.match(r'cannot parse " x y z "\n:\d+:', str(e.value))
