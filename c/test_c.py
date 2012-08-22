@@ -905,6 +905,13 @@ def test_call_function_9():
     BSShort = new_primitive_type("short")
     assert f(3, cast(BSChar, -3), cast(BUChar, 200), cast(BSShort, -5)) == 192
 
+def test_call_function_21():
+    BInt = new_primitive_type("int")
+    BFunc21 = new_function_type((BInt, BInt), BInt, False)
+    f = cast(BFunc21, _testfunc(21))
+    assert f(40, 2) == 42
+    assert f(-100, -100) == -200
+
 def test_cannot_call_with_a_autocompleted_struct():
     BSChar = new_primitive_type("signed char")
     BDouble = new_primitive_type("double")

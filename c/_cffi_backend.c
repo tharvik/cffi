@@ -4202,6 +4202,17 @@ static short _testfunc20(struct _testfunc7_s *ptr)
     return ptr->a1 + ptr->a2;
 }
 
+#ifdef MS_WIN32
+#define stdcall __stdcall
+#else
+#define sdcall 
+#endif
+
+static int stdcall _testfunc21(int a, int b)
+{
+    return a+b;
+}
+
 static PyObject *b__testfunc(PyObject *self, PyObject *args)
 {
     /* for testing only */
@@ -4231,6 +4242,7 @@ static PyObject *b__testfunc(PyObject *self, PyObject *args)
     case 18: f = &_testfunc18; break;
     case 19: f = &_testfunc19; break;
     case 20: f = &_testfunc20; break;
+    case 21: f = &_testfunc21; break;
     default:
         PyErr_SetNone(PyExc_ValueError);
         return NULL;
