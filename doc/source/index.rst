@@ -1045,7 +1045,7 @@ Misc methods on ffi
 -------------------
 
 ``ffi.include(other_ffi)``: includes the typedefs, structs, unions and
-enums defined in another FFI instance.  Usage is similar to a
+enum types defined in another FFI instance.  Usage is similar to a
 ``#include`` in C, where a part of the program might include types
 defined in another part for its own usage.  Note that the include()
 method has no effect on functions, constants and global variables, which
@@ -1079,8 +1079,9 @@ string) from the 'cdata'.  *New in version 0.3.*
   byte string or unicode string.  (Note that in some situation a single
   wchar_t may require a Python unicode string of length 2.)
 
-- If 'cdata' is an enum, returns the value of the enumerator as a
-  string, or ``#NUMBER`` if the value is out of range.
+- If 'cdata' is an enum, returns the value of the enumerator as a string.
+  If the value is out of range, it is simply returned as the stringified
+  integer.
 
 
 ``ffi.buffer(cdata, [size])``: return a buffer object that references
@@ -1207,14 +1208,15 @@ Known missing features that are GCC or MSVC extensions:
   length 0, allocating a ``char[]`` of the correct size, and casting
   it to a struct pointer)
 
-* Enum types are always ``int``.  GCC supports enums containing
-  larger constants (``unsigned int``, or ``long long``) as an extension
-  to the C standard, but CFFI does not.  Use
-  ``typedef <exact type> my_enum;`` and then some ``#define foo <value>``.
-
 .. versionadded:: 0.4
    Now supported: the common GCC extension of anonymous nested
    structs/unions inside structs/unions.
+
+.. versionadded:: 0.6
+   Enum types follow the GCC rules: they are defined as the first of
+   ``unsigned int``, ``int``, ``unsigned long`` or ``long`` that fits
+   all numeric values.  Note that the first choice is unsigned.  In CFFI
+   0.5 and before, it was always ``int``.
 
 
 Debugging dlopen'ed C libraries
@@ -1268,8 +1270,8 @@ allowed.
 |    C type     |   writing into         | reading from     |other operations|
 +===============+========================+==================+================+
 |   integers    | an integer or anything | a Python int or  | int()          |
-|               | on which int() works   | long, depending  |                |
-|               | (but not a float!).    | on the type      |                |
+|   and enums   | on which int() works   | long, depending  |                |
+|   `(*****)`   | (but not a float!).    | on the type      |                |
 |               | Must be within range.  |                  |                |
 +---------------+------------------------+------------------+----------------+
 |   ``char``    | a string of length 1   | a string of      | int()          |
@@ -1288,9 +1290,9 @@ allowed.
 |               | anything on which      | precision `(***)`|                |
 |               | float() works          |                  |                |
 +---------------+------------------------+------------------+----------------+
-|  pointers     | another <cdata> with   | a <cdata>        | ``[]``, ``+``, |
-|               | a compatible type (i.e.|                  | ``-``, bool()  |
-|               | same type or ``char*`` |                  |                |
+|  pointers     | another <cdata> with   | a <cdata>        |``[]`` `(****)`,|
+|               | a compatible type (i.e.|                  |``+``, ``-``,   |
+|               | same type or ``char*`` |                  |bool()          |
 |               | or ``void*``, or as an |                  |                |
 |               | array instead) `(*)`   |                  |                |
 +---------------+------------------------+                  |                |
@@ -1306,9 +1308,9 @@ allowed.
 | function      | same as pointers       |                  | bool(),        |
 | pointers      |                        |                  | call `(**)`    |
 +---------------+------------------------+------------------+----------------+
-|  arrays       | a list or tuple of     | a <cdata>        | len(), iter(), |
-|               | items                  |                  | ``[]``,        |
-|               |                        |                  | ``+``, ``-``   |
+|  arrays       | a list or tuple of     | a <cdata>        |len(), iter(),  |
+|               | items                  |                  |``[]`` `(****)`,|
+|               |                        |                  |``+``, ``-``    |
 +---------------+------------------------+                  +----------------+
 |  ``char[]``   | same as arrays, or a   |                  | len(), iter(), |
 |               | Python string          |                  | ``[]``, ``+``, |
@@ -1326,11 +1328,6 @@ allowed.
 +---------------+------------------------+                  +----------------+
 | union         | same as struct, but    |                  | read/write     |
 |               | with at most one field |                  | fields         |
-+---------------+------------------------+------------------+----------------+
-| enum          | an integer, or the enum| the enum value   | int()          |
-|               | value as a string or   | as a string, or  |                |
-|               | as ``"#NUMBER"``       | ``"#NUMBER"``    |                |
-|               |                        | if out of range  |                |
 +---------------+------------------------+------------------+----------------+
 
 .. versionchanged:: 0.3
@@ -1362,6 +1359,24 @@ a pointer inside the Python string object.
    call ``float()``.  If you want to operate on such numbers
    without any precision loss, you need to define and use a family of C
    functions like ``long double add(long double a, long double b);``.
+
+.. versionadded:: 0.6
+   `(****)` Supports simple slices as well: ``x[start:stop]`` gives another
+   cdata object that is a "view" of all items from ``start`` to ``stop``.
+   It is a cdata of type "array" (so e.g. passing it as an argument to a
+   C function would just convert it to a pointer to the ``start`` item).
+   As with indexing, negative bounds mean really negative indices, like in
+   C.  As for slice assignment, it accepts any iterable, including a list
+   of items or another array-like cdata object, but the length must match.
+
+.. versionchanged:: 0.6
+   `(*****)` Enums are now handled like ints (unsigned or signed, int or
+   long, like GCC; note that the first choice is unsigned).  In previous
+   versions, you would get the enum's value as a string.  Now we follow the C
+   convention and treat them as really equivalent to integers.  To compare
+   their value symbolically, use code like ``if x.field == lib.FOO``.
+   If you really want to get their value as a string, use
+   ``ffi.string(ffi.cast("the_enum_type", x.field))``.
 
 
 Reference: verifier
