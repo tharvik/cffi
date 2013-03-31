@@ -10,6 +10,7 @@ class VCPythonEngine(object):
         self.verifier = verifier
         self.ffi = verifier.ffi
         self._struct_pending_verification = {}
+        self._types_of_builtin_functions = {}
 
     def patch_extension_kwds(self, kwds):
         pass
@@ -149,6 +150,8 @@ class VCPythonEngine(object):
         # functions from the module to the 'library' object, and setting
         # up the FFILibrary class with properties for the global C variables.
         self._load(module, 'loaded', library=library)
+        module._cffi_original_ffi = self.ffi
+        module._cffi_types_of_builtin_funcs = self._types_of_builtin_functions
         return library
 
     def _get_declarations(self):
@@ -291,6 +294,8 @@ class VCPythonEngine(object):
         if tp.ellipsis:
             self._do_collect_type(tp)
         else:
+            # don't call _do_collect_type(tp) in this common case,
+            # otherwise test_autofilled_struct_as_argument fails
             for type in tp.args:
                 self._do_collect_type(type)
             self._do_collect_type(tp.result)
@@ -382,7 +387,9 @@ class VCPythonEngine(object):
     def _loaded_cpy_function(self, tp, name, module, library):
         if tp.ellipsis:
             return
-        setattr(library, name, getattr(module, name))
+        func = getattr(module, name)
+        setattr(library, name, func)
+        self._types_of_builtin_functions[func] = tp
 
     # ----------
     # named structs
@@ -771,7 +778,7 @@ typedef unsigned char _Bool;
 #define _cffi_to_c_u64                                                   \
                  ((unsigned long long(*)(PyObject *))_cffi_exports[8])
 #define _cffi_to_c_char                                                  \
-                 ((char(*)(PyObject *))_cffi_exports[9])
+                 ((int(*)(PyObject *))_cffi_exports[9])
 #define _cffi_from_c_pointer                                             \
     ((PyObject *(*)(char *, CTypeDescrObject *))_cffi_exports[10])
 #define _cffi_to_c_pointer                                               \

@@ -333,3 +333,15 @@ class TestFunction(object):
         with open(filename, 'rb') as f:
             res = f.read()
         assert res == b'[hello from custom file][some more output]'
+
+    def test_constants_on_lib(self):
+        ffi = FFI(backend=self.Backend())
+        ffi.cdef("""enum foo_e { AA, BB, CC=5, DD };
+                    typedef enum { EE=-5, FF } some_enum_t;""")
+        lib = ffi.dlopen(None)
+        assert lib.AA == 0
+        assert lib.BB == 1
+        assert lib.CC == 5
+        assert lib.DD == 6
+        assert lib.EE == -5
+        assert lib.FF == -4

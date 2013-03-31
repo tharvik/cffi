@@ -53,6 +53,8 @@ class FFI(object):
             # You need PyPy (>= 2.0 beta), or a CPython (>= 2.6) with
             # _cffi_backend.so compiled.
             import _cffi_backend as backend
+            from . import __version__
+            assert backend.__version__ == __version__
             # (If you insist you can also try to pass the option
             # 'backend=backend_ctypes.CTypesBackend()', but don't
             # rely on it!  It's probably not going to work well.)
@@ -135,8 +137,13 @@ class FFI(object):
         """
         if isinstance(cdecl, basestring):
             return self._typeof(cdecl)
-        else:
+        if isinstance(cdecl, self.CData):
             return self._backend.typeof(cdecl)
+        if isinstance(cdecl, types.BuiltinFunctionType):
+            res = _builtin_function_type(cdecl)
+            if res is not None:
+                return res
+        raise TypeError(type(cdecl))
 
     def sizeof(self, cdecl):
         """Return the size in bytes of the argument.  It can be a
@@ -356,6 +363,7 @@ def _make_ffi_library(ffi, libname, flags):
         if path is None:
             raise OSError("library not found: %r" % (name,))
         backendlib = backend.load_library(path, flags)
+    copied_enums = []
     #
     def make_accessor(name):
         key = 'function ' + name
@@ -377,6 +385,18 @@ def _make_ffi_library(ffi, libname, flags):
                 lambda self, value: write_variable(BType, name, value)))
             return
         #
+        if not copied_enums:
+            from . import model
+            for key, tp in ffi._parser._declarations.items():
+                if not isinstance(tp, model.EnumType):
+                    continue
+                for enumname, enumval in zip(tp.enumerators, tp.enumvalues):
+                    if enumname not in library.__dict__:
+                        library.__dict__[enumname] = enumval
+            copied_enums.append(True)
+        #
+        if name in library.__dict__:   # copied from an enum value just above,
+            return                     # or multithread's race condition
         raise AttributeError(name)
     #
     class FFILibrary(object):
@@ -401,3 +421,17 @@ def _make_ffi_library(ffi, libname, flags):
             pass
     library = FFILibrary()
     return library, library.__dict__
+
+def _builtin_function_type(func):
+    # a hack to make at least ffi.typeof(builtin_function) work,
+    # if the builtin function was obtained by 'vengine_cpy'.
+    import sys
+    try:
+        module = sys.modules[func.__module__]
+        ffi = module._cffi_original_ffi
+        types_of_builtin_funcs = module._cffi_types_of_builtin_funcs
+        tp = types_of_builtin_funcs[func]
+    except (KeyError, AttributeError, TypeError):
+        return None
+    else:
+        return ffi._get_cached_btype(tp)

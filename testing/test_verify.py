@@ -425,13 +425,18 @@ def test_ffi_nonfull_alignment():
 
 def _check_field_match(typename, real, expect_mismatch):
     ffi = FFI()
-    if expect_mismatch == 'by_size':
+    testing_by_size = (expect_mismatch == 'by_size')
+    if testing_by_size:
         expect_mismatch = ffi.sizeof(typename) != ffi.sizeof(real)
     ffi.cdef("struct foo_s { %s x; ...; };" % typename)
     try:
         ffi.verify("struct foo_s { %s x; };" % real)
     except VerificationError:
         if not expect_mismatch:
+            if testing_by_size and typename != real:
+                print("ignoring mismatch between %s* and %s* even though "
+                      "they have the same size" % (typename, real))
+                return
             raise AssertionError("unexpected mismatch: %s should be accepted "
                                  "as equal to %s" % (typename, real))
     else:
@@ -1235,7 +1240,8 @@ def test_bool_on_long_double():
     f0 = lib.square(0.0)
     f2 = lib.square(f)
     f3 = lib.square(f * 2.0)
-    assert repr(f2) != repr(f3)             # two non-null 'long doubles'
+    if repr(f2) == repr(f3):
+        py.test.skip("long double doesn't have enough precision")
     assert float(f0) == float(f2) == float(f3) == 0.0  # too tiny for 'double'
     assert int(ffi.cast("_Bool", f2)) == 1
     assert int(ffi.cast("_Bool", f3)) == 1
@@ -1463,6 +1469,8 @@ def test_enum_size():
                   ('-2147483649L',       8, -1),
                   ('%dL-1L' % (1-2**63), 8, -1)]
     for hidden_value, expected_size, expected_minus1 in cases:
+        if sys.platform == 'win32' and 'U' in hidden_value:
+            continue   # skipped on Windows
         ffi = FFI()
         ffi.cdef("enum foo_e { AA, BB, ... };")
         lib = ffi.verify("enum foo_e { AA, BB=%s };" % hidden_value)
@@ -1582,3 +1590,18 @@ def test_passing_string_or_NULL():
     py.test.raises(TypeError, lib.seeme2, 0.0)
     py.test.raises(TypeError, lib.seeme1, 0)
     py.test.raises(TypeError, lib.seeme2, 0)
+    py.test.raises(TypeError, lib.seeme2, 0L)
+
+def test_typeof_function():
+    ffi = FFI()
+    ffi.cdef("int foo(int, char);")
+    lib = ffi.verify("int foo(int x, char y) { return 42; }")
+    ctype = ffi.typeof(lib.foo)
+    assert len(ctype.args) == 2
+    assert ctype.result == ffi.typeof("int")
+
+def test_call_with_voidstar_arg():
+    ffi = FFI()
+    ffi.cdef("int f(void *);")
+    lib = ffi.verify("int f(void *x) { return ((char*)x)[0]; }")
+    assert lib.f(b"foobar") == ord(b"f")

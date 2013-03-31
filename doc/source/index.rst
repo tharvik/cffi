@@ -90,13 +90,13 @@ Requirements:
 
 Download and Installation:
 
-* http://pypi.python.org/packages/source/c/cffi/cffi-0.5.tar.gz
+* http://pypi.python.org/packages/source/c/cffi/cffi-0.6.tar.gz
 
    - Or grab the most current version by following the instructions below.
 
-   - MD5: b163c11f68cad4371e8caeb91d81743f
+   - MD5: ...
 
-   - SHA: d201e114d701eafbf458ebde569acbcc5225eeff
+   - SHA: ...
 
 * Or get it from the `Bitbucket page`_:
   ``hg clone https://bitbucket.org/cffi/cffi``
@@ -458,6 +458,10 @@ as ``dlopen()`` does dynamically in C.
 For the optional ``flags`` argument, see ``man dlopen`` (ignored on
 Windows).  It defaults to ``ffi.RTLD_NOW``.
 
+This function returns a "library" object that gets closed when it goes
+out of scope.  Make sure you keep the library object around as long as
+needed.
+
 .. _below:
 
 
@@ -621,6 +625,10 @@ not recommended.
    check.  Be sure to have other means of clearing the ``tmpdir``
    whenever you change your sources.
 
+This function returns a "library" object that gets closed when it goes
+out of scope.  Make sure you keep the library object around as long as
+needed.
+
 
 Working with pointers, structures and arrays
 --------------------------------------------
@@ -645,12 +653,11 @@ obvious Python equivalent.  Thus, they correspond to objects of type
 
 ``ffi.new(ctype, [initializer])``: this function builds and returns a
 new cdata object of the given ``ctype``.  The ctype is usually some
-constant string describing the C type.  It must be a pointer, struct,
-union, or array type.  If it is a pointer, e.g. ``"int *"`` or ``struct
-foo *``, then it allocates the memory for one ``int`` or ``struct foo``.
-If it is a struct, union or array, e.g. ``int[10]``, then it allocates
-the memory for the struct or array --- in this example, ten ``int``.  In
-all cases the returned cdata is exactly of type ``ctype``.
+constant string describing the C type.  It must be a pointer or array
+type.  If it is a pointer, e.g. ``"int *"`` or ``struct foo *``, then
+it allocates the memory for one ``int`` or ``struct foo``.  If it is
+an array, e.g. ``int[10]``, then it allocates the memory for ten
+``int``.  In both cases the returned cdata is of type ``ctype``.
 
 The memory is initially filled with zeros.  An initializer can be given
 too, as described later.
@@ -715,16 +722,15 @@ __ `Misc methods on ffi`_
 Any operation that would in C return a pointer or array or struct type
 gives you a fresh cdata object.  Unlike the "original" one, these fresh
 cdata objects don't have ownership: they are merely references to
-existing memory.  Only ``ffi.new()`` returns an object owning the
-memory.
+existing memory.
 
-.. versionchanged:: 0.6
-   The above rule has no more exception: it used to be that
-   ``ffi.new("struct foo_s *")[0]`` would also keep the memory alive,
-   but this was removed in version 0.6.  Now instead you can pass a
-   struct or union type directly to ``ffi.new()``, and get a cdata
-   object of type struct or union that owns the memory, by writing
-   simply ``ffi.new("struct foo_s")``.
+As an exception to the above rule, dereferencing a pointer that owns a
+*struct* or *union* object returns a cdata struct or union object
+that "co-owns" the same memory.  Thus in this case there are two
+objects that can keep the same memory alive.  This is done for cases where
+you really want to have a struct object but don't have any convenient
+place to keep alive the original pointer object (returned by
+``ffi.new()``).
 
 Example::
 
@@ -1489,4 +1495,3 @@ Indices and tables
 
 * :ref:`genindex`
 * :ref:`search`
-
