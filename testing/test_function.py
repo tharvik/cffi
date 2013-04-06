@@ -346,6 +346,31 @@ class TestFunction(object):
         assert lib.EE == -5
         assert lib.FF == -4
 
+    def test_void_star_accepts_string(self):
+        ffi = FFI(backend=self.Backend())
+        ffi.cdef("""int strlen(const void *);""")
+        lib = ffi.dlopen(None)
+        res = lib.strlen(b"hello")
+        assert res == 5
+
+    def test_signed_char_star_accepts_string(self):
+        if self.Backend is CTypesBackend:
+            py.test.skip("not supported by the ctypes backend")
+        ffi = FFI(backend=self.Backend())
+        ffi.cdef("""int strlen(signed char *);""")
+        lib = ffi.dlopen(None)
+        res = lib.strlen(b"hello")
+        assert res == 5
+
+    def test_unsigned_char_star_accepts_string(self):
+        if self.Backend is CTypesBackend:
+            py.test.skip("not supported by the ctypes backend")
+        ffi = FFI(backend=self.Backend())
+        ffi.cdef("""int strlen(unsigned char *);""")
+        lib = ffi.dlopen(None)
+        res = lib.strlen(b"hello")
+        assert res == 5
+
     def test_missing_function(self):
         ffi = FFI(backend=self.Backend())
         ffi.cdef("""
