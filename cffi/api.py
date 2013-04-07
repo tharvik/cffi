@@ -359,10 +359,23 @@ def _make_ffi_library(ffi, libname, flags):
         backendlib = backend.load_library(name, flags)
     except OSError:
         import ctypes.util
-        path = ctypes.util.find_library(name)
-        if path is None:
-            raise OSError("library not found: %r" % (name,))
-        backendlib = backend.load_library(path, flags)
+        backendlib = None
+        if os.name == 'nt':
+            import sys
+            # Allow name in exe location, 
+            # like in ctypes.util.find_library
+            directory = os.path.dirname(sys.executable)
+            if os.path.isfile(os.path.join(directory, name)):
+                backendlib = backend.load_library(name)
+            if not name.lower().endswith('.dll'):
+                tmpname = os.path.join(directory, name + '.dll')
+                if os.path.isfile(tmpname):
+                    backendlib = backend.load_library(name)
+        if not backendlib:            
+            path = ctypes.util.find_library(name)
+            if path is None:
+                raise OSError("library not found: %r" % (name,))
+            backendlib = backend.load_library(path, flags)
     copied_enums = []
     #
     def make_accessor(name):
