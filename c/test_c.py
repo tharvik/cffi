@@ -977,6 +977,9 @@ def test_call_function_20():
     py.test.raises(TypeError, f, x[0])
 
 def test_call_function_21():
+    import os
+    if os.name == 'nt':
+        py.test.skip('crashes the interpreter')
     BInt = new_primitive_type("int")
     BStruct = new_struct_type("struct foo")
     complete_struct_or_union(BStruct, [('a', BInt, -1),
@@ -996,6 +999,9 @@ def test_call_function_21():
     assert res == sum(lst)
 
 def test_call_function_22():
+    import os
+    if os.name == 'nt':
+        py.test.skip('crashes the interpreter')
     BInt = new_primitive_type("int")
     BArray10 = new_array_type(new_pointer_type(BInt), 10)
     BStruct = new_struct_type("struct foo")
@@ -1231,6 +1237,9 @@ def test_a_lot_of_callbacks():
         assert f(-142) == -142 + i
 
 def test_callback_returning_struct():
+    import os
+    if os.name == 'nt':
+        py.test.skip('crashes the interpreter')
     BSChar = new_primitive_type("signed char")
     BInt = new_primitive_type("int")
     BDouble = new_primitive_type("double")
@@ -1250,6 +1259,9 @@ def test_callback_returning_struct():
     assert s.b == 1E-42
 
 def test_callback_returning_big_struct():
+    import os
+    if os.name == 'nt':
+        py.test.skip('crashes the interpreter')
     BInt = new_primitive_type("int")
     BStruct = new_struct_type("struct foo")
     BStructPtr = new_pointer_type(BStruct)
