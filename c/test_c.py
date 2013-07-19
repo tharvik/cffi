@@ -1279,6 +1279,9 @@ def test_callback_receiving_struct():
     assert n == 42
 
 def test_callback_returning_struct():
+    import os
+    if os.name == 'nt':
+        py.test.skip('crashes the interpreter')
     BSChar = new_primitive_type("signed char")
     BInt = new_primitive_type("int")
     BDouble = new_primitive_type("double")
@@ -1322,6 +1325,9 @@ def test_callback_receiving_big_struct():
     assert n == 42
 
 def test_callback_returning_big_struct():
+    import os
+    if os.name == 'nt':
+        py.test.skip('crashes the interpreter')
     BInt = new_primitive_type("int")
     BStruct = new_struct_type("struct foo")
     BStructPtr = new_pointer_type(BStruct)
