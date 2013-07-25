@@ -161,13 +161,16 @@ ffi_status ffi_prep_cif(/*@out@*/ /*@partial@*/ ffi_cif *cif,
 	  /* Add any padding if necessary */
 	  if (((*ptr)->alignment - 1) & bytes)
 	    bytes = ALIGN(bytes, (*ptr)->alignment);
-	  
+           
 #endif
 	  bytes += STACK_ARG_SIZE((*ptr)->size);
 	}
 #endif
     }
 
+#if defined(_MSC_VER) && defined(_WIN64)
+  bytes = bytes < 40 ? 40 : bytes;
+#endif  
   cif->bytes = bytes;
 
   /* Perform machine dependent cif processing */
