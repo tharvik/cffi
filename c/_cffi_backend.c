@@ -3987,8 +3987,13 @@ static int fb_build(struct funcbuilder_s *fb, PyObject *fargs,
 
     if (cif_descr != NULL) {
         /* exchange data size */
+#ifdef _WIN64
+        cif_descr->exchange_size = exchange_offset<40? 40 : exchange_offset;
+#else
         cif_descr->exchange_size = exchange_offset;
-    }
+#endif
+	}
+
     return 0;
 }
 
