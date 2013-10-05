@@ -55,6 +55,17 @@ class Verifier(object):
             self._write_source()
         self._compile_module()
 
+    def make_library(self, libraryfilename):
+        if not self._has_module:
+            self.compile_module()
+        try:
+            same = ffiplatform.samefile(self.modulefilename, libraryfilename)
+        except OSError:
+            same = False
+        if not same:
+            _ensure_dir(libraryfilename)
+            shutil.copy(self.modulefilename, libraryfilename)
+
     def load_library(self):
         """Get a C module from this Verifier instance.
         Returns an instance of a FFILibrary class that behaves like the
