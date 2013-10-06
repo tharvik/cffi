@@ -85,10 +85,10 @@ class FFIBuilder(object):
     def makelib(self, libname, source='', **kwargs):
         # XXX: We use force_generic_engine here because vengine_cpy collects
         #      types when it writes the source.
+        kwargs['force_generic_engine'] = True
         import os.path
         from .verifier import Verifier, _get_so_suffix
-        self.ffi.verifier = Verifier(
-            self.ffi, source, force_generic_engine=True, **kwargs)
+        self.ffi.verifier = Verifier(self.ffi, source, **kwargs)
         libfilename = '_'.join([self._module_name, libname])
         libfilepath = os.path.join(
             self._module_path, libfilename + _get_so_suffix())
