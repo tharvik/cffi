@@ -455,6 +455,7 @@ class FFIBuilder(object):
         self._module_name = module_name
         self._module_path = module_path
         self.ffi = FFI(backend=backend)
+        self._built_files = []
         self._module_source = "\n".join([
             "from cffi import FFI",
             "",
@@ -484,8 +485,9 @@ class FFIBuilder(object):
         self.ffi.verifier = Verifier(
             self.ffi, source, force_generic_engine=True, **kwargs)
         libfilename = '_'.join([self._module_name, libname])
-        self.ffi.verifier.make_library(
-            os.path.join(self._module_path, libfilename + _get_so_suffix()))
+        libfilepath = os.path.join(
+            self._module_path, libfilename + _get_so_suffix())
+        self.ffi.verifier.make_library(libfilepath)
         self._module_source += '\n'.join([
             "def load_%s():",
             "    from cffi.verifier import Verifier",
@@ -497,6 +499,7 @@ class FFIBuilder(object):
             "    return verifier._load_library()",
             "",
         ]) % (libname, libfilename)
+        self._built_files.append(libfilepath)
 
     def write_ffi_module(self):
         import os
@@ -505,9 +508,14 @@ class FFIBuilder(object):
         except OSError:
             pass
 
-        module_filename = self._module_name + '.py'
-        file = open(os.path.join(self._module_path, module_filename), 'w')
+        module_filepath = os.path.join(
+            self._module_path, self._module_name + '.py')
+        file = open(module_filepath, 'w')
         try:
             file.write(self._module_source)
         finally:
             file.close()
+        self._built_files.append(module_filepath)
+
+    def list_built_files(self):
+        return self._built_files

@@ -1,6 +1,7 @@
 import math
 import sys
 from cffi import FFIBuilder
+from cffi.verifier import _get_so_suffix
 
 
 def _clean_modules(tmpdir, module_name):
@@ -17,6 +18,11 @@ def test_ffibuilder_makelib(tmpdir):
     """)
     builder.makelib('foo', '#include <math.h>')
     builder.write_ffi_module()
+
+    assert builder.list_built_files() == [
+        str(tmpdir.join('foo_ffi_foo' + _get_so_suffix())),
+        str(tmpdir.join('foo_ffi.py')),
+    ]
 
     sys.path.append(str(tmpdir))
     try:
@@ -36,6 +42,10 @@ def test_ffibuilder_dlopen(tmpdir):
     builder.add_dlopen('foo', "m")
     builder.write_ffi_module()
 
+    assert builder.list_built_files() == [
+        str(tmpdir.join('foo_ffi.py')),
+    ]
+
     sys.path.append(str(tmpdir))
     try:
         import foo_ffi
@@ -54,6 +64,11 @@ def test_ffibuilder_makelib_and_dlopen(tmpdir):
     builder.makelib('foo', '#include <math.h>')
     builder.add_dlopen('bar', "m")
     builder.write_ffi_module()
+
+    assert builder.list_built_files() == [
+        str(tmpdir.join('foo_ffi_foo' + _get_so_suffix())),
+        str(tmpdir.join('foo_ffi.py')),
+    ]
 
     sys.path.append(str(tmpdir))
     try:
