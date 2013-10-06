@@ -12,12 +12,15 @@ class FFIExtension(Extension):
 class build_ext(_build_ext):
     def build_extension(self, ext):
         if isinstance(ext, FFIExtension):
-            files = ext.ffi_builder(self.build_temp)
-            if not os.path.isdir(self.build_lib):
-                os.mkdir(self.build_lib)
+            pkg = self.package.split('.') if self.package else []
+            temp = os.path.join(self.build_temp, *pkg)
+            lib = os.path.join(self.build_lib, *pkg)
+
+            files = ext.ffi_builder(temp)
+            if not os.path.isdir(lib):
+                os.makedirs(lib)
             for name in files:
-                self.copy_file(
-                    os.path.join(self.build_temp, name),
-                    os.path.join(self.build_lib, name))
+                self.copy_file(os.path.join(temp, name),
+                               os.path.join(lib, name))
         else:
             super(build_ext, self).build_extension(ext)
