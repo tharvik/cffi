@@ -355,6 +355,21 @@ Usually that's all you need, but see the `Reference: verifier`_ section
 for more details about the ``verifier`` object.
 
 
+Bootstrapping CFFI
+------------------
+
+Your ``setup.py`` now needs CFFI to be importable at build time.
+You can let tell ``setuptools`` to download it before you import
+anything from CFFI::
+
+  from setuptools import setup, Distribution
+
+  Distribution(attrs=dict(setup_requires=['cffi']))
+
+  from cffi.packaging import FFIExtension, build_ext
+  ...
+
+
 Cleaning up the __pycache__ directory
 -------------------------------------
 
