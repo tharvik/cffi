@@ -13,6 +13,8 @@ class build_ext(_build_ext):
     def build_extension(self, ext):
         if isinstance(ext, FFIExtension):
             files = ext.ffi_builder(self.build_temp)
+            if not os.path.isdir(self.build_lib):
+                os.mkdir(self.build_lib)
             for name in files:
                 self.copy_file(
                     os.path.join(self.build_temp, name),
