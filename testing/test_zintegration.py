@@ -116,21 +116,24 @@ def test_distutils_package_2():
 
 def test_setuptools_module():
     run_setup_and_program("setuptools_module", '''
-    import snip_setuptools_verify
-    p = snip_setuptools_verify.C.getpwuid(0)
-    assert snip_setuptools_verify.ffi.string(p.pw_name) == b"root"
+    import snip_setuptools_module as _ffi
+    lib = _ffi.load_passwd()
+    p = lib.getpwuid(0)
+    assert _ffi.string(p.pw_name) == b"root"
     ''')
 
 def test_setuptools_package_1():
     run_setup_and_program("setuptools_package_1", '''
-    import snip_setuptools_verify1
-    p = snip_setuptools_verify1.C.getpwuid(0)
-    assert snip_setuptools_verify1.ffi.string(p.pw_name) == b"root"
+    from snip_setuptools_module1 import _ffi
+    lib = _ffi.load_passwd()
+    p = lib.getpwuid(0)
+    assert _ffi.string(p.pw_name) == b"root"
     ''')
 
 def test_setuptools_package_2():
     run_setup_and_program("setuptools_package_2", '''
-    import snip_setuptools_verify2
-    p = snip_setuptools_verify2.C.getpwuid(0)
-    assert snip_setuptools_verify2.ffi.string(p.pw_name) == b"root"
+    from snip_setuptools_module2 import _ffi
+    lib = _ffi.load_passwd()
+    p = lib.getpwuid(0)
+    assert _ffi.string(p.pw_name) == b"root"
     ''')

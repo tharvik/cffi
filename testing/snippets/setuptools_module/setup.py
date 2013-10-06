@@ -1,8 +1,12 @@
-
 from setuptools import setup
-import snip_setuptools_verify
+
+from cffi.packaging import FFIExtension, build_ext
+
+import ffibuilder
+
 
 setup(
-    zip_safe=False,
-    py_modules=['snip_setuptools_verify'],
-    ext_modules=[snip_setuptools_verify.ffi.verifier.get_extension()])
+    data_files=['ffibuilder.py'],
+    ext_modules=[FFIExtension(ffibuilder.build_ffi)],
+    cmdclass={'build_ext': build_ext},
+)
