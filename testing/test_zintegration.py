@@ -108,9 +108,10 @@ def test_distutils_package_1():
 
 def test_distutils_package_2():
     run_setup_and_program("distutils_package_2", '''
-    import snip_basic_verify2
-    p = snip_basic_verify2.C.getpwuid(0)
-    assert snip_basic_verify2.ffi.string(p.pw_name) == b"root"
+    from snip_basic_module2 import _ffi
+    lib = _ffi.load_passwd()
+    p = lib.getpwuid(0)
+    assert _ffi.string(p.pw_name) == b"root"
     ''')
 
 def test_setuptools_module():
