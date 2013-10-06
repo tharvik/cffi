@@ -92,9 +92,10 @@ def test_verifier_distutils_module():
 
 def test_distutils_module():
     run_setup_and_program("distutils_module", '''
-    import snip_basic_verify
-    p = snip_basic_verify.C.getpwuid(0)
-    assert snip_basic_verify.ffi.string(p.pw_name) == b"root"
+    import snip_basic_module
+    lib = snip_basic_module.load_passwd()
+    p = lib.getpwuid(0)
+    assert snip_basic_module.string(p.pw_name) == b"root"
     ''')
 
 def test_distutils_package_1():

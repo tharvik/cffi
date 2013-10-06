@@ -1,7 +1,10 @@
-
 from distutils.core import setup
-import snip_basic_verify
+
+from cffi.packaging import FFIExtension, build_ext
+
+import ffibuilder
 
 setup(
-    py_modules=['snip_basic_verify'],
-    ext_modules=[snip_basic_verify.ffi.verifier.get_extension()])
+    ext_modules=[FFIExtension(ffibuilder.build_ffi)],
+    cmdclass={'build_ext': build_ext},
+)
