@@ -1,7 +1,12 @@
-import py, os, sys, shutil
 import imp
+import os
+import shutil
 import subprocess
+import sys
+
+import py
 from testing.udir import udir
+
 
 def create_venv(name):
     tmpdir = udir.join(name)
