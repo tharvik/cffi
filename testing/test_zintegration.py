@@ -83,6 +83,13 @@ def test_infrastructure():
     assert snip_infrastructure.func() == 42
     ''')
 
+def test_verifier_distutils_module():
+    run_setup_and_program("verifier_distutils_module", '''
+    import snip_basic_verify
+    p = snip_basic_verify.C.getpwuid(0)
+    assert snip_basic_verify.ffi.string(p.pw_name) == b"root"
+    ''')
+
 def test_distutils_module():
     run_setup_and_program("distutils_module", '''
     import snip_basic_verify
