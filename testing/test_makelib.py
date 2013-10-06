@@ -20,8 +20,8 @@ def test_ffibuilder_makelib(tmpdir):
     builder.write_ffi_module()
 
     assert builder.list_built_files() == [
-        str(tmpdir.join('foo_ffi_foo' + _get_so_suffix())),
-        str(tmpdir.join('foo_ffi.py')),
+        'foo_ffi_foo' + _get_so_suffix(),
+        'foo_ffi.py',
     ]
 
     sys.path.append(str(tmpdir))
@@ -43,7 +43,7 @@ def test_ffibuilder_dlopen(tmpdir):
     builder.write_ffi_module()
 
     assert builder.list_built_files() == [
-        str(tmpdir.join('foo_ffi.py')),
+        'foo_ffi.py',
     ]
 
     sys.path.append(str(tmpdir))
@@ -66,8 +66,8 @@ def test_ffibuilder_makelib_and_dlopen(tmpdir):
     builder.write_ffi_module()
 
     assert builder.list_built_files() == [
-        str(tmpdir.join('foo_ffi_foo' + _get_so_suffix())),
-        str(tmpdir.join('foo_ffi.py')),
+        'foo_ffi_foo' + _get_so_suffix(),
+        'foo_ffi.py',
     ]
 
     sys.path.append(str(tmpdir))
