@@ -1,3 +1,4 @@
+import os
 import pickle
 
 from .api import FFI
@@ -67,12 +68,21 @@ def load_%s():
 
 
 class FFIBuilder(object):
-    def __init__(self, module_name, module_path, backend=None):
+    def __init__(self, module_name, build_path, backend=None):
+        module_package = ''
+        if '.' in module_name:
+            module_package, module_name = module_name.rsplit('.', 1)
+        self._module_package = module_package
         self._module_name = module_name
-        self._module_path = module_path
+        self._build_path = build_path
         self.ffi = FFI(backend=backend)
         self._built_files = []
         self._module_source = MODULE_BOILERPLATE
+
+    def _filename(self, name, suffix='.py'):
+        parts = self._module_package.split('.')
+        parts.append(name + suffix)
+        return os.path.join(*parts)
 
     def cdef(self, csource, override=False):
         self.ffi.cdef(csource, override=override)
@@ -86,34 +96,32 @@ class FFIBuilder(object):
         # XXX: We use force_generic_engine here because vengine_cpy collects
         #      types when it writes the source.
         kwargs['force_generic_engine'] = True
-        import os.path
         from .verifier import Verifier, _get_so_suffix
         self.ffi.verifier = Verifier(self.ffi, source, **kwargs)
-        libfilename = '_'.join([self._module_name, libname])
-        libfilepath = os.path.join(
-            self._module_path, libfilename + _get_so_suffix())
-        self.ffi.verifier.make_library(libfilepath)
-        self._module_source += MAKELIB_FUNC_TEMPLATE % (libname, libfilename)
-        self._built_files.append(libfilename + _get_so_suffix())
+        barefilename = '_'.join([self._module_name, libname])
+        libfile_path = self._filename(barefilename, _get_so_suffix())
+        libfile_build_path = os.path.join(self._build_path, libfile_path)
+        self.ffi.verifier.make_library(libfile_build_path)
+        self._module_source += MAKELIB_FUNC_TEMPLATE % (libname, barefilename)
+        self._built_files.append(libfile_path)
 
     def write_ffi_module(self):
         self._module_source += (
             "_ffi._parser._declarations = pickle.loads(%r)\n" %
             pickle.dumps(self.ffi._parser._declarations, 2))
-        import os
         try:
-            os.makedirs(self._module_path)
+            os.makedirs(self._build_path)
         except OSError:
             pass
 
-        module_filename = self._module_name + '.py'
-        module_filepath = os.path.join(self._module_path, module_filename)
-        file = open(module_filepath, 'w')
+        module_path = self._filename(self._module_name)
+        module_build_path = os.path.join(self._build_path, module_path)
+        file = open(module_build_path, 'w')
         try:
             file.write(self._module_source)
         finally:
             file.close()
-        self._built_files.append(module_filename)
+        self._built_files.append(module_path)
 
     def list_built_files(self):
         return self._built_files
