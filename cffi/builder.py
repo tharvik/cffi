@@ -98,7 +98,7 @@ class FFIBuilder(object):
 
     def write_ffi_module(self):
         self._module_source += (
-            "_ffi._parser._declarations = pickle.loads(%r)" %
+            "_ffi._parser._declarations = pickle.loads(%r)\n" %
             pickle.dumps(self.ffi._parser._declarations, 2))
         import os
         try:
