@@ -480,14 +480,12 @@ class FFIBuilder(object):
         # XXX: We use force_generic_engine here because vengine_cpy collects
         #      types when it writes the source.
         import os.path
-        from .verifier import Verifier, _caller_dir_pycache, _get_so_suffix
-        tmpdir = _caller_dir_pycache()
+        from .verifier import Verifier, _get_so_suffix
         self.ffi.verifier = Verifier(
-            self.ffi, source, tmpdir, libname, force_generic_engine=True,
-            **kwargs)
-        libfilename = libname + _get_so_suffix()
+            self.ffi, source, force_generic_engine=True, **kwargs)
+        libfilename = '_'.join([self._module_name, libname])
         self.ffi.verifier.make_library(
-            os.path.join(self._module_path, libfilename))
+            os.path.join(self._module_path, libfilename + _get_so_suffix()))
         self._module_source += '\n'.join([
             "def load_%s():",
             "    from cffi.verifier import Verifier",
@@ -498,7 +496,7 @@ class FFIBuilder(object):
             "    verifier._has_module = True",
             "    return verifier._load_library()",
             "",
-        ]) % (libname, libname)
+        ]) % (libname, libfilename)
 
     def write_ffi_module(self):
         import os

@@ -3,6 +3,13 @@ import sys
 from cffi import FFIBuilder
 
 
+def _clean_modules(tmpdir, module_name):
+    sys.path.remove(str(tmpdir))
+    for name in list(sys.modules.keys()):
+        if name and name.endswith(module_name):
+            sys.modules.pop(name)
+
+
 def test_ffibuilder_makelib(tmpdir):
     builder = FFIBuilder("foo_ffi", str(tmpdir))
     builder.cdef("""
@@ -15,10 +22,7 @@ def test_ffibuilder_makelib(tmpdir):
     try:
         import foo_ffi
     finally:
-        sys.path.remove(str(tmpdir))
-        for name in sys.modules.keys():
-            if name.endswith('foo_ffi'):
-                sys.modules.pop(name)
+        _clean_modules(tmpdir, 'foo_ffi')
 
     lib = foo_ffi.load_foo()
     assert lib.sin(12.3) == math.sin(12.3)
@@ -36,10 +40,7 @@ def test_ffibuilder_dlopen(tmpdir):
     try:
         import foo_ffi
     finally:
-        sys.path.remove(str(tmpdir))
-        for name in sys.modules.keys():
-            if name.endswith('foo_ffi'):
-                sys.modules.pop(name)
+        _clean_modules(tmpdir, 'foo_ffi')
 
     lib = foo_ffi.load_foo()
     assert lib.sin(12.3) == math.sin(12.3)
@@ -58,10 +59,7 @@ def test_ffibuilder_makelib_and_dlopen(tmpdir):
     try:
         import foo_ffi
     finally:
-        sys.path.remove(str(tmpdir))
-        for name in sys.modules.keys():
-            if name.endswith('foo_ffi'):
-                sys.modules.pop(name)
+        _clean_modules(tmpdir, 'foo_ffi')
 
     lib_foo = foo_ffi.load_foo()
     assert lib_foo.sin(12.3) == math.sin(12.3)
