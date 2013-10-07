@@ -1,7 +1,7 @@
 import os
-import pickle
 
 from .api import FFI
+from . import model
 
 
 MODULE_BOILERPLATE = """
@@ -10,7 +10,7 @@ MODULE_BOILERPLATE = """
 #####                                                                  #####
 
 import pickle
-from cffi import FFI
+from cffi import FFI, model
 
 
 _ffi = FFI()
@@ -67,6 +67,60 @@ def load_%s():
 """
 
 
+class NotReadyYet(Exception):
+    pass
+
+
+class DeclarationBuilder(object):
+    def __init__(self, model_object, built_declarations, our_declarations):
+        self._model_object = model_object
+        self._built_declarations = built_declarations
+        self._our_declarations = our_declarations
+
+    def _format_param(self, param):
+        if isinstance(param, model.BaseTypeByIdentity):
+            od = (type(param), getattr(param, 'name', None))
+            if od not in self._our_declarations:
+                return DeclarationBuilder(
+                    param, self._built_declarations,
+                    self._our_declarations).build()
+            if param not in self._built_declarations:
+                raise NotReadyYet()
+            return "declarations[%r]" % self._built_declarations[param]
+        if isinstance(param, tuple):
+            return '(%s,)' % ', '.join(self._format_param(p) for p in param)
+        return repr(param)
+
+    def build(self):
+        try:
+            params = [(k, self._format_param(v))
+                      for k, v in self._model_object._get_items()]
+            if isinstance(self._model_object, model.StructOrUnion):
+                params.extend([
+                    ('fldnames', self._format_param(
+                        self._model_object.fldnames)),
+                    ('fldtypes', self._format_param(
+                        self._model_object.fldtypes)),
+                    ('fldbitsize', self._format_param(
+                        self._model_object.fldbitsize)),
+                ])
+            elif isinstance(self._model_object, model.EnumType):
+                params.extend([
+                    ('enumerators', self._format_param(
+                        self._model_object.enumerators)),
+                    ('enumvalues', self._format_param(
+                        self._model_object.enumvalues)),
+                    ('baseinttype', self._format_param(
+                        self._model_object.baseinttype)),
+                ])
+        except NotReadyYet:
+            return None
+
+        return "model.%s(%s)" % (
+            self._model_object.__class__.__name__, ', '.join(
+                '%s=%s' % param for param in params))
+
+
 class FFIBuilder(object):
     def __init__(self, module_name, build_path, backend=None):
         module_package = ''
@@ -104,11 +158,47 @@ class FFIBuilder(object):
         self.ffi.verifier.make_library(libfile_build_path)
         self._module_source += MAKELIB_FUNC_TEMPLATE % (libname, barefilename)
         self._built_files.append(libfile_path)
+        return self.ffi.verifier._load_library()
+
+    def _write_declarations(self):
+        self._module_source += "def _make_declarations():\n"
+        self._module_source += "    declarations = {}\n"
+
+        declarations = self.ffi._parser._declarations
+        our_decls = set((type(obj), getattr(obj, 'name', None))
+                        for obj in declarations.values())
+        built_decls = {}
+        decls = [(k, DeclarationBuilder(v, built_decls, our_decls))
+                 for k, v in self.ffi._parser._declarations.items()]
+
+        max_tries = (len(decls) + 1) ** 2 / 2
+
+        tries = 0
+        while decls:
+            tries += 1
+            if tries > max_tries:
+                raise Exception("Problem serialising declarations.")
+            name, dbuilder = decls.pop(0)
+            instantiation = dbuilder.build()
+            if instantiation is None:
+                decls.append((name, dbuilder))
+            else:
+                built_decls[dbuilder._model_object] = name
+                self._module_source += "    declarations[%r] = %s\n" % (
+                    name, instantiation)
+                if getattr(dbuilder._model_object, 'partial_resolved', None):
+                    self._module_source += (
+                        "    declarations[%r].partial = True\n" % (name,))
+                    self._module_source += (
+                        "    declarations[%r].partial_resolved = True\n" % (
+                            name,))
+
+        self._module_source += "    return declarations\n\n"
+        self._module_source += (
+            "_ffi._parser._declarations = _make_declarations()\n")
 
     def write_ffi_module(self):
-        self._module_source += (
-            "_ffi._parser._declarations = pickle.loads(%r)\n" %
-            pickle.dumps(self.ffi._parser._declarations, 2))
+        self._write_declarations()
         try:
             os.makedirs(self._build_path)
         except OSError:

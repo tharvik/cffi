@@ -119,10 +119,12 @@ def test_ffi_module_functions(tmpdir):
 def test_ffi_do_some_stuff(tmpdir):
     builder = FFIBuilder("foo_ffi", str(tmpdir))
     builder.cdef("""
+        enum ee { EE1, EE2, EE3, ... };
         struct foo_s { int x; int y; };
         int grid_distance(struct foo_s offset);
     """)
     builder.makelib('foo', """
+        enum ee { EE1=10, EE2, EE3=-10, EE4 };
         struct foo_s { int x; int y; };
         int grid_distance(struct foo_s offset) {
             return offset.x + offset.y;
@@ -142,6 +144,8 @@ def test_ffi_do_some_stuff(tmpdir):
     assert foo_ffi.alignof('struct foo_s') == foo_ffi.sizeof('int')
     assert foo_ffi.typeof(foo_ffi.cast('long', 42)) == foo_ffi.typeof('long')
     assert foo_ffi.string(foo_ffi.new('char *', b"\x00")) == b""
+    assert foo_ffi.string(foo_ffi.cast('enum ee', 11)) == "EE2"
+    assert foo_ffi.string(foo_ffi.cast('enum ee', -10)) == "EE3"
 
     def cb(n):
         return n + 1
