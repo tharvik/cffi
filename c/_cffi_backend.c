@@ -740,95 +740,90 @@ _my_PyLong_AsUnsignedLongLong(PyObject *ob, int strict)
     return (unsigned PY_LONG_LONG)-1;
 }
 
+#define _read_raw_data(type)                    \
+    do {                                        \
+        if (size == sizeof(type)) {             \
+            type r;                             \
+            memcpy(&r, target, sizeof(type));   \
+            return r;                           \
+        }                                       \
+    } while(0)
+
 static PY_LONG_LONG
 read_raw_signed_data(char *target, int size)
 {
-    if (size == sizeof(signed char))
-        return *((signed char*)target);
-    else if (size == sizeof(short))
-        return *((short*)target);
-    else if (size == sizeof(int))
-        return *((int*)target);
-    else if (size == sizeof(long))
-        return *((long*)target);
-    else if (size == sizeof(PY_LONG_LONG))
-        return *((PY_LONG_LONG*)target);
-    else {
-        Py_FatalError("read_raw_signed_data: bad integer size");
-        return 0;
-    }
+    _read_raw_data(signed char);
+    _read_raw_data(short);
+    _read_raw_data(int);
+    _read_raw_data(long);
+    _read_raw_data(PY_LONG_LONG);
+    Py_FatalError("read_raw_signed_data: bad integer size");
+    return 0;
 }
 
 static unsigned PY_LONG_LONG
 read_raw_unsigned_data(char *target, int size)
 {
-    if (size == sizeof(unsigned char))
-        return *((unsigned char*)target);
-    else if (size == sizeof(unsigned short))
-        return *((unsigned short*)target);
-    else if (size == sizeof(unsigned int))
-        return *((unsigned int*)target);
-    else if (size == sizeof(unsigned long))
-        return *((unsigned long*)target);
-    else if (size == sizeof(unsigned PY_LONG_LONG))
-        return *((unsigned PY_LONG_LONG*)target);
-    else {
-        Py_FatalError("read_raw_unsigned_data: bad integer size");
-        return 0;
-    }
+    _read_raw_data(unsigned char);
+    _read_raw_data(unsigned short);
+    _read_raw_data(unsigned int);
+    _read_raw_data(unsigned long);
+    _read_raw_data(unsigned PY_LONG_LONG);
+    Py_FatalError("read_raw_unsigned_data: bad integer size");
+    return 0;
 }
+
+#define _write_raw_data(type)                           \
+    do {                                                \
+        if (size == sizeof(type)) {                     \
+            type r = (type)source;                      \
+            memcpy(target, &r, sizeof(type));           \
+            return;                                     \
+        }                                               \
+    } while(0)
 
 static void
 write_raw_integer_data(char *target, unsigned PY_LONG_LONG source, int size)
 {
-    if (size == sizeof(unsigned char))
-        *((unsigned char*)target) = (unsigned char)source;
-    else if (size == sizeof(unsigned short))
-        *((unsigned short*)target) = (unsigned short)source;
-    else if (size == sizeof(unsigned int))
-        *((unsigned int*)target) = (unsigned int)source;
-    else if (size == sizeof(unsigned long))
-        *((unsigned long*)target) = (unsigned long)source;
-    else if (size == sizeof(unsigned PY_LONG_LONG))
-        *((unsigned PY_LONG_LONG*)target) = source;
-    else
-        Py_FatalError("write_raw_integer_data: bad integer size");
+    _write_raw_data(unsigned char);
+    _write_raw_data(unsigned short);
+    _write_raw_data(unsigned int);
+    _write_raw_data(unsigned long);
+    _write_raw_data(unsigned PY_LONG_LONG);
+    Py_FatalError("write_raw_integer_data: bad integer size");
 }
 
 static double
 read_raw_float_data(char *target, int size)
 {
-    if (size == sizeof(float))
-        return *((float*)target);
-    else if (size == sizeof(double))
-        return *((double*)target);
-    else {
-        Py_FatalError("read_raw_float_data: bad float size");
-        return 0;
-    }
+    _read_raw_data(float);
+    _read_raw_data(double);
+    Py_FatalError("read_raw_float_data: bad float size");
+    return 0;
 }
 
 static long double
 read_raw_longdouble_data(char *target)
 {
-    return *((long double*)target);
+    int size = sizeof(long double);
+    _read_raw_data(long double);
+    Py_FatalError("read_raw_longdouble_data: bad long double size");
+    return 0;
 }
 
 static void
 write_raw_float_data(char *target, double source, int size)
 {
-    if (size == sizeof(float))
-        *((float*)target) = (float)source;
-    else if (size == sizeof(double))
-        *((double*)target) = source;
-    else
-        Py_FatalError("write_raw_float_data: bad float size");
+    _write_raw_data(float);
+    _write_raw_data(double);
+    Py_FatalError("write_raw_float_data: bad float size");
 }
 
 static void
 write_raw_longdouble_data(char *target, long double source)
 {
-    *((long double*)target) = source;
+    int size = sizeof(long double);
+    _write_raw_data(long double);
 }
 
 static PyObject *
@@ -1248,6 +1243,16 @@ convert_struct_from_object(char *data, CTypeDescrObject *ct, PyObject *init,
     return _convert_error(init, ct->ct_name, expected);
 }
 
+#ifdef __GNUC__
+# if __GNUC__ >= 4
+/* Don't go inlining this huge function.  Needed because occasionally
+   it gets inlined in places where is causes a warning: call to
+   __builtin___memcpy_chk will always overflow destination buffer
+   (which is places where the 'ct' should never represent such a large
+   primitive type anyway). */
+__attribute__((noinline))
+# endif
+#endif
 static int
 convert_from_object(char *data, CTypeDescrObject *ct, PyObject *init)
 {
@@ -1959,7 +1964,7 @@ cdata_ass_slice(CDataObject *cd, PySliceObject *slice, PyObject *v)
         if ((ctv->ct_flags & CT_ARRAY) && (ctv->ct_itemdescr == ct) &&
             (get_array_length((CDataObject *)v) == length)) {
             /* fast path: copying from exactly the correct type */
-            memcpy(cdata, ((CDataObject *)v)->c_data, itemsize * length);
+            memmove(cdata, ((CDataObject *)v)->c_data, itemsize * length);
             return 0;
         }
     }
@@ -3622,7 +3627,7 @@ static int complete_sflags(int sflags)
 #ifdef MS_WIN32
         sflags |= SF_MSVC_BITFIELDS;
 #else
-# ifdef __arm__
+# if defined(__arm__) || defined(__aarch64__)
         sflags |= SF_GCC_ARM_BITFIELDS;
 # else
         sflags |= SF_GCC_X86_BITFIELDS;

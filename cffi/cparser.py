@@ -1,4 +1,3 @@
-
 from . import api, model
 from .commontypes import COMMON_TYPES, resolve_common_type
 try:
@@ -460,6 +459,8 @@ class Parser(object):
             elif kind == 'union':
                 tp = model.UnionType(explicit_name, None, None, None)
             elif kind == 'enum':
+                if explicit_name == '__dotdotdot__':
+                    raise CDefError("Enums cannot be declared with ...")
                 tp = self._build_enum_type(explicit_name, type.values)
             else:
                 raise AssertionError("kind = %r" % (kind,))
@@ -532,9 +533,13 @@ class Parser(object):
 
     def _parse_constant(self, exprnode, partial_length_ok=False):
         # for now, limited to expressions that are an immediate number
-        # or negative number
+        # or positive/negative number
         if isinstance(exprnode, pycparser.c_ast.Constant):
             return int(exprnode.value, 0)
+        #
+        if (isinstance(exprnode, pycparser.c_ast.UnaryOp) and
+                exprnode.op == '+'):
+            return self._parse_constant(exprnode.expr)
         #
         if (isinstance(exprnode, pycparser.c_ast.UnaryOp) and
                 exprnode.op == '-'):
