@@ -2037,3 +2037,16 @@ def test_getlasterror_working_even_with_pypys_jit():
             n = (1 << 29) + i
             lib.SetLastError(n)
             assert ffi.getwinerror()[0] == n
+
+def test_verify_include_dir():
+    curdir = os.getcwd()
+    try:
+        os.chdir('..')
+        ffi = FFI()
+        ffi.cdef("int v_include_dir(void);")
+        lib = ffi.verify('#include "verify_include_dir.h"',
+                         include_dirs=['$HERE/snippets/'],
+                         sources=['$HERE/snippets/verify_include_dir.c'])
+        assert lib.v_include_dir() == 42
+    finally:
+        os.chdir(curdir)

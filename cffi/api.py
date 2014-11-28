@@ -336,6 +336,7 @@ class FFI(object):
         """
         from .verifier import Verifier
         self.verifier = Verifier(self, source, tmpdir, **kwargs)
+        self.verifier.expand_here_in_kwds(frame=sys._getframe(1))
         lib = self.verifier.load_library()
         self._libraries.append(lib)
         return lib

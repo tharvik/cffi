@@ -11,6 +11,11 @@ else:
     def _extension_suffixes():
         return [suffix for suffix, _, type in imp.get_suffixes()
                 if type == imp.C_EXTENSION]
+try:
+    basestring
+except NameError:
+    # Python 3.x
+    basestring = str
 
 
 class Verifier(object):
@@ -103,6 +108,24 @@ class Verifier(object):
         sourcename = ffiplatform.maybe_relative_path(self.sourcefilename)
         modname = self.get_module_name()
         return ffiplatform.get_extension(sourcename, modname, **self.kwds)
+
+    def expand_here_in_kwds(self, here=None, frame=None):
+        if frame is not None:
+            try:
+                here = os.path.dirname(frame.f_globals['__file__'])
+            except (AttributeError, KeyError):
+                pass
+        for key, value in self.kwds.items():
+            if not isinstance(value, list):
+                continue
+            for i in range(len(value)):
+                x = value[i]
+                if isinstance(x, basestring) and (
+                        x.startswith('$HERE/') or x.startswith('$HERE\\')):
+                    if here is None:
+                        raise ValueError("prefix '$HERE' cannot be replaced")
+                    x = os.path.join(here, x[6:])
+                    value[i] = x
 
     def generates_python_module(self):
         return self._vengine._gen_python_module
