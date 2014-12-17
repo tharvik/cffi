@@ -138,15 +138,22 @@ class VCPythonEngine(object):
         prnt()
         prnt('#endif')
 
-    def load_library(self):
+    def load_library(self, flags=None):
         # XXX review all usages of 'self' here!
         # import it as a new extension module
+        if hasattr(sys, "getdlopenflags"):
+            previous_flags = sys.getdlopenflags()
         try:
+            if hasattr(sys, "setdlopenflags") and flags is not None:
+                sys.setdlopenflags(flags)
             module = imp.load_dynamic(self.verifier.get_module_name(),
                                       self.verifier.modulefilename)
         except ImportError as e:
             error = "importing %r: %s" % (self.verifier.modulefilename, e)
             raise ffiplatform.VerificationError(error)
+        finally:
+            if hasattr(sys, "setdlopenflags"):
+                sys.setdlopenflags(previous_flags)
         #
         # call loading_cpy_struct() to get the struct layout inferred by
         # the C compiler

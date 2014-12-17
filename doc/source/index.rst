@@ -500,7 +500,7 @@ needed.
 The verification step
 ---------------------
 
-``ffi.verify(source, tmpdir=.., ext_package=.., modulename=.., **kwargs)``:
+``ffi.verify(source, tmpdir=.., ext_package=.., modulename=.., flags=.., **kwargs)``:
 verifies that the current ffi signatures
 compile on this machine, and return a dynamic library object.  The
 dynamic library can be used to call functions and access global
@@ -675,6 +675,10 @@ not recommended.
              int somefunc(int somearg) { return real_cpp_func(somearg); }
          }
      ''', source_extension='.cpp', extra_compile_args=['-std=c++11'])
+
+.. versionadded:: 0.8.7
+   The optional ``flags`` argument has been added, see ``man dlopen`` (ignored
+   on Windows).  It defaults to ``ffi.RTLD_NOW``.
 
 This function returns a "library" object that gets closed when it goes
 out of scope.  Make sure you keep the library object around as long as

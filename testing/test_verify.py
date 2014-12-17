@@ -2037,3 +2037,21 @@ def test_getlasterror_working_even_with_pypys_jit():
             n = (1 << 29) + i
             lib.SetLastError(n)
             assert ffi.getwinerror()[0] == n
+
+def test_verify_dlopen_flags():
+    ffi1 = FFI()
+    ffi1.cdef("int foo;")
+
+    lib1 = ffi1.verify("int foo;", flags=ffi1.RTLD_GLOBAL | ffi1.RTLD_LAZY)
+    lib2 = get_second_lib()
+
+    lib1.foo = 42
+
+    assert lib2.foo == 42
+
+def get_second_lib():
+    # Hack, using modulename makes the test fail
+    ffi2 = FFI()
+    ffi2.cdef("int foo;")
+    lib2 = ffi2.verify("int foo;", flags=ffi2.RTLD_GLOBAL | ffi2.RTLD_LAZY)
+    return lib2
