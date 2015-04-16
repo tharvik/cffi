@@ -91,6 +91,19 @@ EXPORT RECT ReturnRect(int i, RECT ar, RECT* br, POINT cp, RECT dr,
     return ar;
 }
 
+typedef int (*callback_RECT)(RECT r);
+typedef int (*callback_POINT)(POINT r);
+
+EXPORT int Callback_RECT_Test( RECT r, callback_RECT cb)
+{
+    return cb(r);
+}
+
+EXPORT int Callback_POINT_Test( POINT p, callback_POINT cb)
+{
+    return cb(p);
+}
+
 EXPORT int my_array[7] = {0, 1, 2, 3, 4, 5, 6};
 """
 
@@ -282,3 +295,61 @@ class TestOwnLib(object):
             assert ret.right == ownlib.right
             assert ret.top == ownlib.top
             assert ret.bottom == ownlib.bottom
+
+    def test_struct_callback(self):
+        if self.module is None:
+            py.test.skip("fix the auto-generation of the tiny test lib")
+        ffi = FFI(backend=self.Backend())
+        ffi.cdef("""
+            typedef struct {
+                long x;
+                long y;
+            } POINT;
+
+            typedef struct {
+                long left;
+                long top;
+                long right;
+                long bottom;
+            } RECT;
+
+            typedef int (*callback_RECT)(RECT r);
+            typedef int (*callback_POINT)(POINT r);
+            
+            int Callback_RECT_Test( RECT r, callback_RECT cb);
+            int Callback_POINT_Test( POINT r, callback_POINT cb);
+            """)
+        ownlib = ffi.dlopen(self.module)
+
+        rect = ffi.new('RECT[1]')
+        pt = ffi.new('POINT[1]')
+        pt[0].x = 100
+        pt[0].y = 200
+        rect[0].left = 10
+        rect[0].right = 20
+        rect[0].top = 30
+        rect[0].bottom = 40
+        def check_rect(cb_rect):
+            if cb_rect.left != rect[0].left:
+                print 'got',cb_rect.left,'wanted',rect[0].left
+                return 0
+            if cb_rect.top != rect[0].top:
+                return 0
+            if cb_rect.right != rect[0].right:
+                return 0
+            if cb_rect.bottom != rect[0].bottom:
+                return 0
+            return 1
+        cb = ffi.callback('int(RECT)', check_rect)
+        result = ownlib.Callback_RECT_Test(rect[0], cb)
+        assert result == 1
+
+        def check_point(cb_point):
+            if cb_point.x != pt[0].x:
+                return 0
+            if cb_point.y != pt[0].y:
+                return 0
+            return 1
+        cb = ffi.callback('int(POINT)', check_point)
+        result = ownlib.Callback_POINT_Test(pt[0], cb)
+        assert result == 1
