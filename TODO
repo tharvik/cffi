@@ -1,0 +1,15 @@
+
+
+* write docs!  also, remember to remove ``ext_package=".."`` from
+  setup.py, which was needed with verify() but is just confusion
+  with set_source().
+
+* document distutils + setuptools + just distributing the C sources
+
+* version-1.0.0.diff
+
+* mention todo: cffi-runtime package
+
+* mention todo: ffi.new("xyz") makes {"xyz": <ctype>} always immortal
+
+* mention todo: dlopen(), by "compiling" a cdef()-only FFI into a .py module
