@@ -448,6 +448,9 @@ static PyObject *ffi_getctype(FFIObject *self, PyObject *args)
     int add_paren, add_space;
     CTypeDescrObject *ct;
     size_t replace_with_len;
+#if PY_MAJOR_VERSION >= 3
+    PyObject *u;
+#endif
 
     if (!PyArg_ParseTuple(args, "O|s:getctype", &c_decl, &replace_with))
         return NULL;
@@ -482,9 +485,9 @@ static PyObject *ffi_getctype(FFIObject *self, PyObject *args)
 
 #if PY_MAJOR_VERSION >= 3
     /* bytes -> unicode string */
-    PyObject *u = PyUnicode_DecodeLatin1(PyBytes_AS_STRING(res),
-                                         PyBytes_GET_SIZE(res),
-                                         NULL);
+    u = PyUnicode_DecodeLatin1(PyBytes_AS_STRING(res),
+                               PyBytes_GET_SIZE(res),
+                               NULL);
     Py_DECREF(res);
     res = u;
 #endif
