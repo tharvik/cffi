@@ -24,7 +24,8 @@ _r_partial_array = re.compile(r"\[\s*\.\.\.\s*\]")
 _r_words = re.compile(r"\w+|\S")
 _parser_cache = None
 _r_int_literal = re.compile(r"-?0?x?[0-9a-f]+[lu]*$", re.IGNORECASE)
-_r_c_macro = re.compile(r"^\s*#")
+_r_enter_c_macro = re.compile(r"^\s*#\s*(if|elif|ifdef|ifndef|else)\s*(.*)")
+_r_exit_c_macro = re.compile(r"^\s*#\s*(endif)")
 
 def _get_parser():
     global _parser_cache
@@ -36,12 +37,6 @@ def _preprocess(csource):
     # Remove comments.  NOTE: this only work because the cdef() section
     # should not contain any string literal!
     csource = _r_comment.sub(' ', csource)
-    # Remove the "#define FOO x" lines
-    macros = {}
-    for match in _r_define.finditer(csource):
-        macroname, macrovalue = match.groups()
-        macros[macroname] = macrovalue
-    csource = _r_define.sub('', csource)
     # Replace "[...]" with "[__dotdotdotarray__]"
     csource = _r_partial_array.sub('[__dotdotdotarray__]', csource)
     # Replace "...}" with "__dotdotdotNUM__}".  This construction should
@@ -63,7 +58,7 @@ def _preprocess(csource):
                                                  csource[p+3:])
     # Replace all remaining "..." with the same name, "__dotdotdot__",
     # which is declared with a typedef for the purpose of C parsing.
-    return csource.replace('...', ' __dotdotdot__ '), macros
+    return csource.replace('...', ' __dotdotdot__ ')
 
 def _common_type_names(csource):
     # Look in the source for what looks like usages of types from the
@@ -105,22 +100,51 @@ class Parser(object):
         self._recomplete = []
         self._uses_new_feature = None
 
-    def _extract_macros(self, csource):
+    def _extract_ifdefs(self, csource):
         """
-        Extract macros from csource.
-
-        :returns: [(ln, macro), ...]
+        Extract macros from csource. (Also defines.)
         """
 
-        macros = []
+        current = []
+        continuing = False
+
+        stack = []
+        ifdefs = []
+        defines = []
 
         for num, line in enumerate(csource.splitlines()):
-            if _r_c_macro.match(line):
-                macros.append((num, line))
+            if continuing or _r_enter_c_macro.match(line):
+                line_condition = ""
+                current.append(line)
+                continuing = line.endswith("\\")
 
-        return macros
+                if not continuing:
+                    macro = "".join(current)
+                    match = _r_enter_c_macro.match(macro)
 
-    def _clean_macros(self, csource):
+                    if match.group(1) == "else":
+                        stack.append("!({0})".format(stack.pop()))
+                    else:
+                        stack.append(match.group(2))
+
+                    current = []
+
+            elif _r_exit_c_macro.match(line) and stack:
+                line_condition = ""
+                stack.pop()
+
+            else:
+                line_condition = " && ".join(stack)
+
+                if _r_define.match(line):
+                    match = _r_define.match(line)
+                    defines.append((num, match.group(1), match.group(2)))
+
+            ifdefs.append(line_condition)
+
+        return ifdefs, defines
+
+    def _clean_ifdefs(self, csource):
         """
         Remove macros from the csource
 
@@ -130,7 +154,7 @@ class Parser(object):
         cleaned = []
 
         for line in csource.splitlines():
-            if _r_c_macro.match(line):
+            if _r_enter_c_macro.match(line) or _r_exit_c_macro.match(line) or _r_define.match(line):
                 cleaned.append("")
             else:
                 cleaned.append(line)
@@ -138,7 +162,8 @@ class Parser(object):
         return '\n'.join(cleaned)
 
     def _parse(self, csource):
-        csource, macros = _preprocess(csource)
+        csource = _preprocess(csource)
+
         # XXX: for more efficiency we would need to poke into the
         # internals of CParser...  the following registers the
         # typedefs, because their presence or absence influences the
@@ -151,12 +176,14 @@ class Parser(object):
                 typenames.append(name)
                 ctn.discard(name)
         typenames += sorted(ctn)
-        #
+
         csourcelines = ['typedef int %s;' % typename for typename in typenames]
         csourcelines.append('typedef int __dotdotdot__;')
         csourcelines.append(csource)
-
         csource = '\n'.join(csourcelines)
+
+        ifdefs, defines = self._extract_ifdefs(csource)
+        csource = self._clean_ifdefs(csource)
 
         if lock is not None:
             lock.acquire()     # pycparser is not thread-safe...
@@ -168,7 +195,7 @@ class Parser(object):
             if lock is not None:
                 lock.release()
         # csource will be used to find buggy source text
-        return ast, macros, csource
+        return ast, defines, csource, ifdefs
 
     def _convert_pycparser_error(self, e, csource):
         # xxx look for ":NUM:" at the start of str(e) and try to interpret
@@ -206,9 +233,13 @@ class Parser(object):
             self._packed = prev_packed
 
     def _internal_parse(self, csource):
-        ast, macros, csource = self._parse(csource)
-        # add the macros
-        self._process_macros(macros)
+        ast, defines, csource, ifdefs = self._parse(csource)
+
+        self._ifdefs = ifdefs
+
+        # add the defines
+        self._process_defines(defines)
+
         # find the first "__dotdotdot__" and use that as a separator
         # between the repeated typedefs and the real csource
         iterator = iter(ast.ext)
@@ -235,7 +266,9 @@ class Parser(object):
                         realtype = model.unknown_ptr_type(decl.name)
                     else:
                         realtype = self._get_type(decl.type, name=decl.name)
-                    self._declare('typedef ' + decl.name, realtype)
+
+                    ifdef = self._ifdefs[decl.coord.line - 1]
+                    self._declare(('typedef', decl.name, ifdef), realtype)
                 else:
                     raise api.CDefError("unrecognized construct", decl)
         except api.FFIError as e:
@@ -267,13 +300,13 @@ class Parser(object):
         self._add_constants(name, pyvalue)
         self._declare('macro ' + name, pyvalue)
 
-    def _process_macros(self, macros):
-        for key, value in macros.items():
+    def _process_defines(self, defines):
+        for ln, key, value in defines:
             value = value.strip()
             if _r_int_literal.match(value):
                 self._add_integer_constant(key, value)
-            elif value == '...':
-                self._declare('macro ' + key, value)
+            elif value == '__dotdotdot__':
+                self._declare(('macro', key), value)
             else:
                 raise api.CDefError(
                     'only supports one of the following syntax:\n'
@@ -285,12 +318,14 @@ class Parser(object):
                     % (key, key, key, value))
 
     def _parse_decl(self, decl):
+        ifdef = self._ifdefs[decl.coord.line - 1]
         node = decl.type
+
         if isinstance(node, pycparser.c_ast.FuncDecl):
             tp = self._get_type(node, name=decl.name)
             assert isinstance(tp, model.RawFunctionType)
             tp = self._get_type_pointer(tp)
-            self._declare('function ' + decl.name, tp)
+            self._declare(('function', decl.name, ifdef), tp)
         else:
             if isinstance(node, pycparser.c_ast.Struct):
                 self._get_struct_union_enum_type('struct', node)
@@ -306,7 +341,7 @@ class Parser(object):
                 tp = self._get_type(node, partial_length_ok=True)
                 if tp.is_raw_function:
                     tp = self._get_type_pointer(tp)
-                    self._declare('function ' + decl.name, tp)
+                    self._declare(('function', decl.name, ifdef), tp)
                 elif (tp.is_integer_type() and
                         hasattr(decl, 'init') and
                         hasattr(decl.init, 'value') and
@@ -320,9 +355,9 @@ class Parser(object):
                     self._add_integer_constant(decl.name,
                                                '-' + decl.init.expr.value)
                 elif self._is_constant_globalvar(node):
-                    self._declare('constant ' + decl.name, tp)
+                    self._declare(('constant', decl.name, ifdef), tp)
                 else:
-                    self._declare('variable ' + decl.name, tp)
+                    self._declare(('variable', decl.name, ifdef), tp)
 
     def parse_type(self, cdecl):
         ast, macros = self._parse('void __dummy(\n%s\n);' % cdecl)[:2]
@@ -332,16 +367,19 @@ class Parser(object):
             raise api.CDefError("unknown identifier '%s'" % (exprnode.name,))
         return self._get_type(exprnode.type)
 
-    def _declare(self, name, obj, included=False):
-        if name in self._declarations:
-            if self._declarations[name] is obj:
+    def _declare(self, key, obj, included=False):
+        assert isinstance(key, tuple)
+
+        if key in self._declarations:
+            if self._declarations[key] is obj:
                 return
+
             if not self._override:
                 raise api.FFIError(
-                    "multiple declarations of %s (for interactive usage, "
-                    "try cdef(xx, override=True))" % (name,))
-        assert '__dotdotdot__' not in name.split()
-        self._declarations[name] = obj
+                    "multiple declarations of %s %s (for interactive usage, "
+                    "try cdef(xx, override=True))" % (key[0], key[1]))
+        assert '__dotdotdot__' != key[1]
+        self._declarations[key] = obj
         if included:
             self._included_declarations.add(obj)
 
@@ -520,7 +558,7 @@ class Parser(object):
             tp = None
         else:
             explicit_name = name
-            key = '%s %s' % (kind, name)
+            key = (kind, name)
             tp = self._declarations.get(key, None)
         #
         if tp is None:

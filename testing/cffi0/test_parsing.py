@@ -143,35 +143,58 @@ def test_typedef_array_convert_array_to_pointer():
         BType = ffi._get_cached_btype(type)
     assert str(BType) == '<func (<pointer to <int>>), <int>, False>'
 
-def test_extract_macros():
+def test_extract_ifdefs():
     parser = Parser()
-    macros = parser._extract_macros("""
+
+    macros = parser._extract_ifdefs("""
+    #if FOO
+    int q;
+    #else
     int x;
-    #if defined(FOO)
+    #if BAR
     int y;
+    #endif
     #endif
     int z;
     """)
 
     assert macros == [
-        (2, "    #if defined(FOO)"),
-        (4, "    #endif")
+        '',
+        '',
+        'FOO',
+        '',
+        '!(FOO)',
+        '',
+        '!(FOO) && BAR',
+        '',
+        '',
+        '',
+        ''
     ]
 
-def test_clean_macros():
+
+def test_clean_ifdefs():
     parser = Parser()
-    clean = parser._clean_macros("""
+    clean = parser._clean_ifdefs("""
+    #if FOO
+    int q;
+    #else
     int x;
-    #if defined(FOO)
+    #if BAR
     int y;
+    #endif
     #endif
     int z;
     """)
 
     assert clean == """
+
+    int q;
+
     int x;
 
     int y;
+
 
     int z;
     """
