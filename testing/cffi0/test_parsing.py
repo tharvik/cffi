@@ -1,5 +1,6 @@
-import py, sys, re
+import py, sys, re, textwrap
 from cffi import FFI, FFIError, CDefError, VerificationError
+from cffi.cparser import Parser
 
 class FakeBackend(object):
 
@@ -141,6 +142,39 @@ def test_typedef_array_convert_array_to_pointer():
         type = ffi._parser.parse_type("fn_t")
         BType = ffi._get_cached_btype(type)
     assert str(BType) == '<func (<pointer to <int>>), <int>, False>'
+
+def test_extract_macros():
+    parser = Parser()
+    macros = parser._extract_macros("""
+    int x;
+    #if defined(FOO)
+    int y;
+    #endif
+    int z;
+    """)
+
+    assert macros == [
+        (2, "    #if defined(FOO)"),
+        (4, "    #endif")
+    ]
+
+def test_clean_macros():
+    parser = Parser()
+    clean = parser._clean_macros("""
+    int x;
+    #if defined(FOO)
+    int y;
+    #endif
+    int z;
+    """)
+
+    assert clean == """
+    int x;
+
+    int y;
+
+    int z;
+    """
 
 def test_remove_comments():
     ffi = FFI(backend=FakeBackend())

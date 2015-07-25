@@ -24,6 +24,7 @@ _r_partial_array = re.compile(r"\[\s*\.\.\.\s*\]")
 _r_words = re.compile(r"\w+|\S")
 _parser_cache = None
 _r_int_literal = re.compile(r"-?0?x?[0-9a-f]+[lu]*$", re.IGNORECASE)
+_r_c_macro = re.compile(r"^\s*#")
 
 def _get_parser():
     global _parser_cache
@@ -104,6 +105,38 @@ class Parser(object):
         self._recomplete = []
         self._uses_new_feature = None
 
+    def _extract_macros(self, csource):
+        """
+        Extract macros from csource.
+
+        :returns: [(ln, macro), ...]
+        """
+
+        macros = []
+
+        for num, line in enumerate(csource.splitlines()):
+            if _r_c_macro.match(line):
+                macros.append((num, line))
+
+        return macros
+
+    def _clean_macros(self, csource):
+        """
+        Remove macros from the csource
+
+        :returns: csource minus any C macros
+        """
+
+        cleaned = []
+
+        for line in csource.splitlines():
+            if _r_c_macro.match(line):
+                cleaned.append("")
+            else:
+                cleaned.append(line)
+
+        return '\n'.join(cleaned)
+
     def _parse(self, csource):
         csource, macros = _preprocess(csource)
         # XXX: for more efficiency we would need to poke into the
@@ -122,7 +155,9 @@ class Parser(object):
         csourcelines = ['typedef int %s;' % typename for typename in typenames]
         csourcelines.append('typedef int __dotdotdot__;')
         csourcelines.append(csource)
+
         csource = '\n'.join(csourcelines)
+
         if lock is not None:
             lock.acquire()     # pycparser is not thread-safe...
         try:
