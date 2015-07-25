@@ -17,11 +17,14 @@ class Ifdef:
         self._child = child
 
     def as_c_expr(self):
-        return """\
-        #if {0}
-        {1}
-        #endif
-        """.format(self._ifdef, self._child.as_c_expr())
+        if self._ifdef:
+            return """\
+            #if {0}
+            {1}
+            #endif
+            """.format(self._ifdef, self._child.as_c_expr())
+        else:
+            return self._child.as_c_expr()
 
 class GlobalExpr:
     def __init__(self, name, address, type_op, size=0, check_value=0):
@@ -615,7 +618,8 @@ class Recompiler:
         else:
             argname = 'args'
 
-        prnt('#if {0}'.format(ifdef))
+        if ifdef:
+            prnt('#if {0}'.format(ifdef))
 
         #
         # ------------------------------
@@ -745,7 +749,10 @@ class Recompiler:
             prnt('#  define _cffi_f_%s _cffi_d_%s' % (name, name))
         #
         prnt('#endif')        # ------------------------------
-        prnt('#endif')
+
+        if ifdef:
+            prnt('#endif')
+
         prnt()
 
     def _generate_cpy_function_ctx(self, tp, name, ifdef):
