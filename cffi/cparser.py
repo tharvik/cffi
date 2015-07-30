@@ -29,6 +29,7 @@ _r_int_literal = re.compile(r"-?0?x?[0-9a-f]+[lu]*$", re.IGNORECASE)
 _r_ifdef = re.compile(r"^[ \t\r\f\v]*#\s*(if|elif|ifdef|ifndef|else|endif)"
                       r"\b((?:[^\n\\]|\\.)*?)$",
                       re.DOTALL | re.MULTILINE)
+_r_multispaces = re.compile(r"\s+", re.MULTILINE)
 
 def _get_parser():
     global _parser_cache
@@ -150,6 +151,7 @@ class Parser(object):
             flush()
             keyword = match.group(1)
             condition = match.group(2).replace('\\\n', '').strip()
+            condition = _r_multispaces.sub(' ', condition)
             if keyword == 'if':
                 stack.append(condition)
             elif keyword == 'ifdef':
@@ -160,9 +162,11 @@ class Parser(object):
                 condition1 = pop()
                 stack.append('%s\x00(%s)' % (negate(condition1), condition))
             elif keyword == 'else':
+                # 'condition' ignored here
                 condition1 = pop()
                 stack.append(negate(condition1))
             elif keyword == 'endif':
+                # 'condition' ignored here
                 pop()
             else:
                 raise AssertionError(keyword)

@@ -247,10 +247,10 @@ BAR2
         '',
         None,
         None,
-        r'FOO  FO\\O2',
+        r'FOO FO\\O2',
         None,
         None,
-        r'!(FOO  FO\\O2) && (BARBAR2)',
+        r'!(FOO FO\\O2) && (BARBAR2)',
         None,
         ''
     ]
