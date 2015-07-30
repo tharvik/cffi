@@ -17,7 +17,7 @@ except ImportError:
 
 _r_comment = re.compile(r"/\*.*?\*/|//([^\n\\]|\\.)*?$",
                         re.DOTALL | re.MULTILINE)
-_r_define  = re.compile(r"^\s*#\s*define\s+([A-Za-z_][A-Za-z_0-9]*)"
+_r_define  = re.compile(r"^[ \t\r\f\v]*#\s*define\s+([A-Za-z_][A-Za-z_0-9]*)"
                         r"\b((?:[^\n\\]|\\.)*?)$",
                         re.DOTALL | re.MULTILINE)
 _r_partial_enum = re.compile(r"=\s*\.\.\.\s*[,}]|\.\.\.\s*\}")
@@ -26,8 +26,9 @@ _r_partial_array = re.compile(r"\[\s*\.\.\.\s*\]")
 _r_words = re.compile(r"\w+|\S")
 _parser_cache = None
 _r_int_literal = re.compile(r"-?0?x?[0-9a-f]+[lu]*$", re.IGNORECASE)
-_r_enter_c_macro = re.compile(r"^\s*#\s*(if|elif|ifdef|ifndef|else)\s*(.*)")
-_r_exit_c_macro = re.compile(r"^\s*#\s*(endif)")
+_r_ifdef = re.compile(r"^[ \t\r\f\v]*#\s*(if|elif|ifdef|ifndef|else|endif)"
+                      r"\b((?:[^\n\\]|\\.)*?)$",
+                      re.DOTALL | re.MULTILINE)
 
 def _get_parser():
     global _parser_cache
@@ -67,7 +68,7 @@ def _preprocess(csource):
                                                  csource[p+3:])
     # Replace all remaining "..." with the same name, "__dotdotdot__",
     # which is declared with a typedef for the purpose of C parsing.
-    return csource.replace('...', ' __dotdotdot__ ')
+    return csource.replace('...', ' __dotdotdot__ '), macros
 
 def _common_type_names(csource):
     # Look in the source for what looks like usages of types from the
@@ -111,67 +112,75 @@ class Parser(object):
 
     def _extract_ifdefs(self, csource):
         """
-        Extract macros from csource. (Also defines.)
+        Extract the "#if" conditions from csource.
+        Returns a list with one item per source line, which is an
+        empty string if that line appears outside "#if" blocks, or
+        otherwise a string giving the condition for that line.
         """
-
-        current = []
-        continuing = False
-
-        stack = []
         ifdefs = []
+        stack = []
         defines = []
 
-        for num, line in enumerate(csource.splitlines()):
-            if continuing or _r_enter_c_macro.match(line):
-                line_condition = ""
-                current.append(line)
-                continuing = line.endswith("\\")
-
-                if not continuing:
-                    macro = "".join(current)
-                    match = _r_enter_c_macro.match(macro)
-
-                    if match.group(1) == "else":
-                        stack.append("!({0})".format(stack.pop()))
-                    else:
-                        stack.append(match.group(2))
-
-                    current = []
-
-            elif _r_exit_c_macro.match(line) and stack:
-                line_condition = ""
-                stack.pop()
-
+        def flush():
+            n = len(ifdefs)
+            assert n <= linenum1
+            if len(stack) == 0:
+                result = ''
+            elif len(stack) == 1:
+                result = stack[0]
             else:
-                line_condition = " && ".join(stack)
+                result = ' && '.join(['(%s)' % s for s in stack])
+            result = result.replace('\x00', ' && ')
+            ifdefs.extend([result] * (linenum1 - n))
 
-                if _r_define.match(line):
-                    match = _r_define.match(line)
-                    defines.append((num, match.group(1), match.group(2)))
+        def pop():
+            if not stack:
+                raise api.CDefError("line %d: unexpected '#%s'" % (
+                    linenum1, keyword))
+            return stack.pop()
 
-            ifdefs.append(line_condition)
+        def negate(cond):
+            limit = cond.rfind('\x00') + 1
+            old, recent = cond[:limit], cond[limit:]
+            return '%s!(%s)' % (old, recent)
 
-        return ifdefs, defines
-
-    def _clean_ifdefs(self, csource):
-        """
-        Remove macros from the csource
-
-        :returns: csource minus any C macros
-        """
-
-        cleaned = []
-
-        for line in csource.splitlines():
-            if _r_enter_c_macro.match(line) or _r_exit_c_macro.match(line) or _r_define.match(line):
-                cleaned.append("")
+        for match in _r_ifdef.finditer(csource):
+            linenum1 = csource[:match.start()].count('\n')
+            linenum2 = linenum1 + match.group().count('\n') + 1
+            flush()
+            keyword = match.group(1)
+            condition = match.group(2).replace('\\\n', '').strip()
+            if keyword == 'if':
+                stack.append(condition)
+            elif keyword == 'ifdef':
+                stack.append('defined(%s)' % condition)
+            elif keyword == 'ifndef':
+                stack.append('!defined(%s)' % condition)
+            elif keyword == 'elif':
+                condition1 = pop()
+                stack.append('%s\x00(%s)' % (negate(condition1), condition))
+            elif keyword == 'else':
+                condition1 = pop()
+                stack.append(negate(condition1))
+            elif keyword == 'endif':
+                pop()
             else:
-                cleaned.append(line)
+                raise AssertionError(keyword)
+            assert len(ifdefs) == linenum1
+            ifdefs += [None] * (linenum2 - linenum1)
+        if stack:
+            raise api.CDefError("there are more '#ifXXX' than '#endif'")
+        linenum1 = csource.count('\n') + 1
+        flush()
 
-        return '\n'.join(cleaned)
+        def replace_with_eol(m):
+            num_eol = m.group().count('\n')
+            return num_eol * '\n'
+        csource = _r_ifdef.sub(replace_with_eol, csource)
+        return csource, ifdefs
 
     def _parse(self, csource):
-        csource = _preprocess(csource)
+        csource, defines = _preprocess(csource)
 
         # XXX: for more efficiency we would need to poke into the
         # internals of CParser...  the following registers the
@@ -185,14 +194,13 @@ class Parser(object):
                 typenames.append(name)
                 ctn.discard(name)
         typenames += sorted(ctn)
-
+        #
         csourcelines = ['typedef int %s;' % typename for typename in typenames]
         csourcelines.append('typedef int __dotdotdot__;')
         csourcelines.append(csource)
         csource = '\n'.join(csourcelines)
 
-        ifdefs, defines = self._extract_ifdefs(csource)
-        csource = self._clean_ifdefs(csource)
+        csource, ifdefs = self._extract_ifdefs(csource)
 
         if lock is not None:
             lock.acquire()     # pycparser is not thread-safe...

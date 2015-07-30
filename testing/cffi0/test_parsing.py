@@ -143,10 +143,39 @@ def test_typedef_array_convert_array_to_pointer():
         BType = ffi._get_cached_btype(type)
     assert str(BType) == '<func (<pointer to <int>>), <int>, False>'
 
-def test_extract_ifdefs():
+def test_extract_ifdefs_err():
+    parser = Parser()
+    py.test.raises(CDefError, parser._extract_ifdefs, "#if ABC")  # unbalanced
+    py.test.raises(CDefError, parser._extract_ifdefs, "#else")    # unexpected
+    py.test.raises(CDefError, parser._extract_ifdefs, "#endif")   # unexpected
+
+def test_extract_ifdefs_1():
     parser = Parser()
 
-    macros = parser._extract_ifdefs("""
+    _, macros = parser._extract_ifdefs("""
+    #ifdef FOO
+    int q;
+    #endif
+    #ifndef BAR
+    int b;
+    #endif
+    """)
+
+    assert macros == [
+        '',
+        None,
+        'defined(FOO)',
+        None,
+        None,
+        '!defined(BAR)',
+        None,
+        ''
+    ]
+
+def test_extract_ifdefs_2():
+    parser = Parser()
+
+    _, macros = parser._extract_ifdefs("""
     #if FOO
     int q;
     #else
@@ -160,22 +189,84 @@ def test_extract_ifdefs():
 
     assert macros == [
         '',
-        '',
+        None,
         'FOO',
-        '',
+        None,
         '!(FOO)',
-        '',
-        '!(FOO) && BAR',
-        '',
-        '',
+        None,
+        '(!(FOO)) && (BAR)',
+        None,
+        None,
         '',
         ''
     ]
 
+def test_extract_ifdefs_3():
+    parser = Parser()
+
+    _, macros = parser._extract_ifdefs("""
+    #if FOO
+    int q;
+    #elif BAR
+    int x;
+    #elif BAZ
+    int y;
+    #else
+    int z;
+    #endif
+    """)
+
+    assert macros == [
+        '',
+        None,
+        'FOO',
+        None,
+        '!(FOO) && (BAR)',
+        None,
+        '!(FOO) && !((BAR)) && (BAZ)',
+        None,
+        '!(FOO) && !((BAR)) && !((BAZ))',
+        None,
+        ''
+    ]
+
+def test_extract_ifdefs_continuation():
+    parser = Parser()
+
+    clean, macros = parser._extract_ifdefs(r"""   // <= note the 'r' here
+    #if FOO \
+ FO\\O2
+    int q;
+    #elif BAR\
+BAR2
+    int x;
+    #endif
+    """)
+
+    assert macros == [
+        '',
+        None,
+        None,
+        r'FOO  FO\\O2',
+        None,
+        None,
+        r'!(FOO  FO\\O2) && (BARBAR2)',
+        None,
+        ''
+    ]
+    assert clean == r"""   // <= note the 'r' here
+
+
+    int q;
+
+
+    int x;
+
+    """
 
 def test_clean_ifdefs():
     parser = Parser()
-    clean = parser._clean_ifdefs("""
+    clean, _ = parser._extract_ifdefs("""
     #if FOO
     int q;
     #else
