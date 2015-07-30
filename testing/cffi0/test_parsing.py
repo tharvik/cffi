@@ -152,7 +152,7 @@ def test_extract_ifdefs_err():
 def test_extract_ifdefs_1():
     parser = Parser()
 
-    _, macros = parser._extract_ifdefs("""
+    _, _, macros = parser._extract_ifdefs("""
     #ifdef FOO
     int q;
     #endif
@@ -175,7 +175,7 @@ def test_extract_ifdefs_1():
 def test_extract_ifdefs_2():
     parser = Parser()
 
-    _, macros = parser._extract_ifdefs("""
+    _, _, macros = parser._extract_ifdefs("""
     #if FOO
     int q;
     #else
@@ -204,7 +204,7 @@ def test_extract_ifdefs_2():
 def test_extract_ifdefs_3():
     parser = Parser()
 
-    _, macros = parser._extract_ifdefs("""
+    _, _, macros = parser._extract_ifdefs("""
     #if FOO
     int q;
     #elif BAR
@@ -233,7 +233,7 @@ def test_extract_ifdefs_3():
 def test_extract_ifdefs_4():
     parser = Parser()
 
-    _, macros = parser._extract_ifdefs("""
+    _, _, macros = parser._extract_ifdefs("""
     #ifdef ABC
     #ifdef BCD
     int q;
@@ -264,7 +264,7 @@ def test_extract_ifdefs_4():
 def test_extract_ifdefs_continuation():
     parser = Parser()
 
-    clean, macros = parser._extract_ifdefs(r"""   // <= note the 'r' here
+    clean, _, macros = parser._extract_ifdefs(r"""   // <= note the 'r' here
     #if FOO \
  FO\\O2
     int q;
@@ -297,7 +297,7 @@ BAR2
 
 def test_clean_ifdefs():
     parser = Parser()
-    clean, _ = parser._extract_ifdefs("""
+    clean, _, _ = parser._extract_ifdefs("""
     #if FOO
     int q;
     #else
@@ -320,6 +320,28 @@ def test_clean_ifdefs():
 
     int z;
     """
+
+def test_defines_with_ifdefs():
+    parser = Parser()
+    _, defines, macros = parser._extract_ifdefs("""
+    #if FOO
+    #  define ABC 42
+    #else
+    #  define BCD 4\\
+3
+    #endif
+    """)
+
+    assert macros == [
+        '',
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        '']
+    assert defines == [('FOO', 'ABC', '42'), ('!(FOO)', 'BCD', '43')]
 
 def test_remove_comments():
     ffi = FFI(backend=FakeBackend())
@@ -362,10 +384,13 @@ def test_line_continuation_in_defines():
             42
         #define BCD   \\
             43
+        #define CDE  3\\
+9
     """)
     m = ffi.dlopen(lib_m)
     assert m.ABC == 42
     assert m.BCD == 43
+    assert m.CDE == 39
 
 def test_define_not_supported_for_now():
     ffi = FFI(backend=FakeBackend())

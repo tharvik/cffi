@@ -17,19 +17,18 @@ except ImportError:
 
 _r_comment = re.compile(r"/\*.*?\*/|//([^\n\\]|\\.)*?$",
                         re.DOTALL | re.MULTILINE)
-_r_define  = re.compile(r"^[ \t\r\f\v]*#\s*define\s+([A-Za-z_][A-Za-z_0-9]*)"
-                        r"\b((?:[^\n\\]|\\.)*?)$",
-                        re.DOTALL | re.MULTILINE)
 _r_partial_enum = re.compile(r"=\s*\.\.\.\s*[,}]|\.\.\.\s*\}")
 _r_enum_dotdotdot = re.compile(r"__dotdotdot\d+__$")
 _r_partial_array = re.compile(r"\[\s*\.\.\.\s*\]")
 _r_words = re.compile(r"\w+|\S")
 _parser_cache = None
 _r_int_literal = re.compile(r"-?0?x?[0-9a-f]+[lu]*$", re.IGNORECASE)
-_r_ifdef = re.compile(r"^[ \t\r\f\v]*#\s*(if|elif|ifdef|ifndef|else|endif)"
-                      r"\b((?:[^\n\\]|\\.)*?)$",
-                      re.DOTALL | re.MULTILINE)
+_r_ifdef = re.compile(
+    r"^[ \t\r\f\v]*#\s*(if|elif|ifdef|ifndef|else|endif|define)"
+    r"\b((?:[^\n\\]|\\.)*?)$",
+    re.DOTALL | re.MULTILINE)
 _r_multispaces = re.compile(r"\s+", re.MULTILINE)
+_r_single_word = re.compile(r"[A-Za-z_][A-Za-z0-9_]+")
 
 def _get_parser():
     global _parser_cache
@@ -41,13 +40,6 @@ def _preprocess(csource):
     # Remove comments.  NOTE: this only work because the cdef() section
     # should not contain any string literal!
     csource = _r_comment.sub(' ', csource)
-    # Remove the "#define FOO x" lines
-    macros = {}
-    for match in _r_define.finditer(csource):
-        macroname, macrovalue = match.groups()
-        macrovalue = macrovalue.replace('\\\n', '').strip()
-        macros[macroname] = macrovalue
-    csource = _r_define.sub('', csource)
     # Replace "[...]" with "[__dotdotdotarray__]"
     csource = _r_partial_array.sub('[__dotdotdotarray__]', csource)
     # Replace "...}" with "__dotdotdotNUM__}".  This construction should
@@ -69,7 +61,7 @@ def _preprocess(csource):
                                                  csource[p+3:])
     # Replace all remaining "..." with the same name, "__dotdotdot__",
     # which is declared with a typedef for the purpose of C parsing.
-    return csource.replace('...', ' __dotdotdot__ '), macros
+    return csource.replace('...', ' __dotdotdot__ ')
 
 def _common_type_names(csource):
     # Look in the source for what looks like usages of types from the
@@ -133,6 +125,7 @@ class Parser(object):
                 result = ' && '.join(['(%s)' % s for s in stack])
             result = result.replace('\x00', ' && ')
             ifdefs.extend([result] * (linenum1 - n))
+            return result
 
         def pop():
             if not stack:
@@ -148,11 +141,19 @@ class Parser(object):
         for match in _r_ifdef.finditer(csource):
             linenum1 = csource[:match.start()].count('\n')
             linenum2 = linenum1 + match.group().count('\n') + 1
-            flush()
+            current_outer_condition = flush()
             keyword = match.group(1)
             condition = match.group(2).replace('\\\n', '').strip()
             condition = _r_multispaces.sub(' ', condition)
-            if keyword == 'if':
+            if keyword == 'define':
+                match2 = _r_single_word.match(condition)
+                if not match2:
+                    raise api.CDefError("line %d: '#define' not followed by "
+                                        "a word" % linenum1)
+                singleword = match2.group()
+                defines.append((current_outer_condition, singleword,
+                                condition[len(singleword):].strip()))
+            elif keyword == 'if':
                 stack.append(condition)
             elif keyword == 'ifdef':
                 stack.append('defined(%s)' % condition)
@@ -181,10 +182,10 @@ class Parser(object):
             num_eol = m.group().count('\n')
             return num_eol * '\n'
         csource = _r_ifdef.sub(replace_with_eol, csource)
-        return csource, ifdefs
+        return csource, defines, ifdefs
 
     def _parse(self, csource):
-        csource, defines = _preprocess(csource)
+        csource = _preprocess(csource)
 
         # XXX: for more efficiency we would need to poke into the
         # internals of CParser...  the following registers the
@@ -204,7 +205,7 @@ class Parser(object):
         csourcelines.append(csource)
         csource = '\n'.join(csourcelines)
 
-        csource, ifdefs = self._extract_ifdefs(csource)
+        csource, defines, ifdefs = self._extract_ifdefs(csource)
 
         if lock is not None:
             lock.acquire()     # pycparser is not thread-safe...
@@ -381,8 +382,9 @@ class Parser(object):
                     self._declare(('variable', decl.name, ifdef), tp)
 
     def parse_type(self, cdecl):
-        ast, macros = self._parse('void __dummy(\n%s\n);' % cdecl)[:2]
+        ast, macros, _, ifdefs = self._parse('void __dummy(\n%s\n);' % cdecl)
         assert not macros
+        assert not ifdefs
         exprnode = ast.ext[-1].type.args.params[0]
         if isinstance(exprnode, pycparser.c_ast.ID):
             raise api.CDefError("unknown identifier '%s'" % (exprnode.name,))
