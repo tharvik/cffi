@@ -607,7 +607,7 @@ def _make_ffi_library(ffi, libname, flags):
     copied_enums = []
     #
     def make_accessor_locked(name):
-        key = 'function ' + name
+        key = ('function', name, '')
         if key in ffi._parser._declarations:
             tp = ffi._parser._declarations[key]
             BType = ffi._get_cached_btype(tp)
@@ -618,7 +618,7 @@ def _make_ffi_library(ffi, libname, flags):
             library.__dict__[name] = value
             return
         #
-        key = 'variable ' + name
+        key = ('variable', name, '')
         if key in ffi._parser._declarations:
             tp = ffi._parser._declarations[key]
             BType = ffi._get_cached_btype(tp)
@@ -645,7 +645,7 @@ def _make_ffi_library(ffi, libname, flags):
             if name in library.__dict__:
                 return
         #
-        key = 'constant ' + name
+        key = ('constant', name, '')
         if key in ffi._parser._declarations:
             raise NotImplementedError("fetching a non-integer constant "
                                       "after dlopen()")

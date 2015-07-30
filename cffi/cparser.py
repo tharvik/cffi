@@ -392,6 +392,7 @@ class Parser(object):
 
     def _declare(self, key, obj, included=False):
         assert isinstance(key, tuple)
+        assert isinstance(key[2], str)
 
         if key in self._declarations:
             if self._declarations[key] is obj:
