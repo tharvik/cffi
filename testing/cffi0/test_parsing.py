@@ -230,6 +230,37 @@ def test_extract_ifdefs_3():
         ''
     ]
 
+def test_extract_ifdefs_4():
+    parser = Parser()
+
+    _, macros = parser._extract_ifdefs("""
+    #ifdef ABC
+    #ifdef BCD
+    int q;
+    #elif BAR
+    int x;
+    #else
+    int y;
+    #endif
+    int z;
+    #endif
+    """)
+
+    assert macros == [
+        '',
+        None,
+        None,
+        '(defined(ABC)) && (defined(BCD))',
+        None,
+        '(defined(ABC)) && (!(defined(BCD)) && (BAR))',
+        None,
+        '(defined(ABC)) && (!(defined(BCD)) && !((BAR)))',
+        None,
+        'defined(ABC)',
+        None,
+        ''
+    ]
+
 def test_extract_ifdefs_continuation():
     parser = Parser()
 
