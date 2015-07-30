@@ -5,6 +5,22 @@ from .cffi_opcode import *
 VERSION = "0x2601"
 
 
+class Ifdef:
+    def __init__(self, ifdef, child):
+        self.name = child.name
+        self._ifdef = ifdef
+        self._child = child
+
+    def as_c_expr(self):
+        if self._ifdef:
+            return """\
+            #if {0}
+            {1}
+            #endif
+            """.format(self._ifdef, self._child.as_c_expr())
+        else:
+            return self._child.as_c_expr()
+
 class GlobalExpr:
     def __init__(self, name, address, type_op, size=0, check_value=0):
         self.name = name
@@ -205,18 +221,20 @@ class Recompiler:
         return sorted(self.ffi._parser._declarations.items())
 
     def _generate(self, step_name):
-        for name, tp in self._get_declarations():
-            kind, realname = name.split(' ', 1)
+        for key, tp in self._get_declarations():
+            kind, realname, ifdef = key
+
             try:
                 method = getattr(self, '_generate_cpy_%s_%s' % (kind,
                                                                 step_name))
             except AttributeError:
                 raise ffiplatform.VerificationError(
-                    "not implemented in recompile(): %r" % name)
+                    "not implemented in recompile(): %r %r" % key[:2])
+
             try:
-                method(tp, realname)
+                method(tp, realname, ifdef)
             except Exception as e:
-                model.attach_exception_info(e, name)
+                model.attach_exception_info(e, key)
                 raise
 
     # ----------
@@ -351,7 +369,10 @@ class Recompiler:
                 prnt('  NULL,  /* no %ss */' % step_name)
         for step_name in self.ALL_STEPS:
             if step_name != "field":
-                prnt('  %d,  /* num_%ss */' % (nums[step_name], step_name))
+                if nums[step_name]:
+                    prnt('  sizeof(_cffi_{0}s)/sizeof(_cffi_{0}s[0]), /* num_{0}s */'.format(step_name))
+                else:
+                    prnt('  0, /* num_{0}s */'.format(step_name))
         if self.ffi._included_ffis:
             prnt('  _cffi_includes,')
         else:
@@ -569,12 +590,12 @@ class Recompiler:
     # ----------
     # function declarations
 
-    def _generate_cpy_function_collecttype(self, tp, name):
+    def _generate_cpy_function_collecttype(self, tp, name, ifdef):
         self._do_collect_type(tp.as_raw_function())
         if tp.ellipsis and not self.target_is_python:
             self._do_collect_type(tp)
 
-    def _generate_cpy_function_decl(self, tp, name):
+    def _generate_cpy_function_decl(self, tp, name, ifdef):
         assert not self.target_is_python
         assert isinstance(tp, model.FunctionPtrType)
         if tp.ellipsis:
@@ -591,6 +612,10 @@ class Recompiler:
             argname = 'arg0'
         else:
             argname = 'args'
+
+        if ifdef:
+            prnt('#if {0}'.format(ifdef))
+
         #
         # ------------------------------
         # the 'd' version of the function, only for addressof(lib, 'func')
@@ -719,9 +744,13 @@ class Recompiler:
             prnt('#  define _cffi_f_%s _cffi_d_%s' % (name, name))
         #
         prnt('#endif')        # ------------------------------
+
+        if ifdef:
+            prnt('#endif')
+
         prnt()
 
-    def _generate_cpy_function_ctx(self, tp, name):
+    def _generate_cpy_function_ctx(self, tp, name, ifdef):
         if tp.ellipsis and not self.target_is_python:
             self._generate_cpy_constant_ctx(tp, name)
             return
@@ -736,9 +765,12 @@ class Recompiler:
         else:
             meth_kind = OP_CPYTHON_BLTN_V   # 'METH_VARARGS'
         self._lsts["global"].append(
-            GlobalExpr(name, '_cffi_f_%s' % name,
-                       CffiOp(meth_kind, type_index),
-                       size='_cffi_d_%s' % name))
+            Ifdef(ifdef,
+                GlobalExpr(name, '_cffi_f_%s' % name,
+                    CffiOp(meth_kind, type_index),
+                    size='_cffi_d_%s' % name)
+            )
+        )
 
     # ----------
     # named structs or unions

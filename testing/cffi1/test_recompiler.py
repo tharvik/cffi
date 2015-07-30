@@ -116,6 +116,17 @@ def test_type_table_include_2():
                      "(FUNCTION 1)(POINTER 3)(FUNCTION_END 0)(STRUCT_UNION 0)",
                      included="struct foo_s { int x, y; };")
 
+def test_math_sin_ifdef():
+    import math
+    ffi = FFI()
+    ffi.cdef("""
+    #if defined(MATH_PLEASE)
+    float sinxxx(double);
+    double cos(double);
+    #endif
+    """)
+    lib = verify(ffi, 'test_math_sin_ifdef', '#include <math.h>')
+    assert not hasattr(lib, "cos")
 
 def test_math_sin():
     import math
