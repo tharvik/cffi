@@ -4,11 +4,6 @@ from .cffi_opcode import *
 
 VERSION = "0x2601"
 
-try:
-    int_type = (int, long)
-except NameError:    # Python 3
-    int_type = int
-
 
 class Ifdef:
     def __init__(self, ifdef, child):
