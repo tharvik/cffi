@@ -511,13 +511,13 @@ def test_conditional_typedef_used_by_func_2():
         #else
         typedef long foo_t;
         #endif
-        foo_t foo(char);
+        foo_t *foo(char);
     """)
     case = ffi._parser._declarations['function foo']
     assert isinstance(case, ConditionalCase)
     assert case.condition == 'defined(ABC)'
-    assert str(case.iftrue) == '<func (<char>), <int>, False>'
-    assert str(case.iffalse) == '<func (<char>), <long>, False>'
+    assert str(case.iftrue) == '<func (<char>), <pointer to <int>>, False>'
+    assert str(case.iffalse) == '<func (<char>), <pointer to <long>>, False>'
 
 def test_conditional_typedef_not_used_by_func():
     ffi = FFI(backend=FakeBackend())
@@ -531,6 +531,27 @@ def test_conditional_typedef_not_used_by_func():
     """)
     case = ffi._parser._declarations['function foo']
     assert str(case) == '<func (<char>), <char>, False>'
+
+def test_conditional_typedef_partially_defined_1():
+    ffi = FFI(backend=FakeBackend())
+    ffi.cdef("""
+        #ifdef ABC
+        typedef int foo_t;
+        #endif
+        char foo(char);
+    """)
+    case = ffi._parser._declarations['function foo']
+    assert str(case) == '<func (<char>), <char>, False>'
+
+def test_conditional_typedef_partially_defined_2():
+    ffi = FFI(backend=FakeBackend())
+    ffi.cdef("""
+        #ifdef ABC
+        typedef int foo_t;
+        #endif
+        char foo(foo_t *);
+    """)
+    should_crash
 
 def test_conditional_nested():
     ffi = FFI(backend=FakeBackend())
