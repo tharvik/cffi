@@ -245,6 +245,11 @@ typedef struct {
 } CDataObject_gcp;
 
 typedef struct {
+    CDataObject head;
+    ffi_closure *closure;
+} CDataObject_closure;
+
+typedef struct {
     ffi_cif cif;
     /* the following information is used when doing the call:
        - a buffer of size 'exchange_size' is malloced
@@ -1609,8 +1614,8 @@ static void cdataowninggc_dealloc(CDataObject *cd)
         Py_DECREF(x);
     }
     else if (cd->c_type->ct_flags & CT_FUNCTIONPTR) {   /* a callback */
-        ffi_closure *closure = (ffi_closure *)cd->c_data;
-        PyObject *args = (PyObject *)(closure->user_data);
+        ffi_closure *closure = ((CDataObject_closure *)cd)->closure;
+        PyObject *args = (PyObject *)closure->user_data;
         Py_XDECREF(args);
         ffi_closure_free(closure);
     }
@@ -1629,8 +1634,8 @@ static int cdataowninggc_traverse(CDataObject *cd, visitproc visit, void *arg)
         Py_VISIT(x);
     }
     else if (cd->c_type->ct_flags & CT_FUNCTIONPTR) {   /* a callback */
-        ffi_closure *closure = (ffi_closure *)cd->c_data;
-        PyObject *args = (PyObject *)(closure->user_data);
+        ffi_closure *closure = ((CDataObject_closure *)cd)->closure;
+        PyObject *args = (PyObject *)closure->user_data;
         Py_VISIT(args);
     }
     else if (cd->c_type->ct_flags & CT_IS_UNSIZED_CHAR_A) {  /* from_buffer */
@@ -1649,8 +1654,8 @@ static int cdataowninggc_clear(CDataObject *cd)
         Py_DECREF(x);
     }
     else if (cd->c_type->ct_flags & CT_FUNCTIONPTR) {   /* a callback */
-        ffi_closure *closure = (ffi_closure *)cd->c_data;
-        PyObject *args = (PyObject *)(closure->user_data);
+        ffi_closure *closure = ((CDataObject_closure *)cd)->closure;
+        PyObject *args = (PyObject *)closure->user_data;
         closure->user_data = NULL;
         Py_XDECREF(args);
     }
@@ -1837,7 +1842,8 @@ static PyObject *cdataowninggc_repr(CDataObject *cd)
         return _cdata_repr2(cd, "handle to", x);
     }
     else if (cd->c_type->ct_flags & CT_FUNCTIONPTR) {   /* a callback */
-        PyObject *args = (PyObject *)((ffi_closure *)cd->c_data)->user_data;
+        ffi_closure *closure = ((CDataObject_closure *)cd)->closure;
+        PyObject *args = (PyObject *)closure->user_data;
         if (args == NULL)
             return cdata_repr(cd);
         else
@@ -5084,12 +5090,12 @@ static void invoke_callback(ffi_cif *cif, void *result, void **args,
 static PyObject *b_callback(PyObject *self, PyObject *args)
 {
     CTypeDescrObject *ct, *ctresult;
-    CDataObject *cd;
+    CDataObject_closure *cd;
     PyObject *ob, *error_ob = Py_None, *onerror_ob = Py_None;
     PyObject *py_rawerr, *infotuple = NULL;
     cif_description_t *cif_descr;
     ffi_closure *closure;
-    void *closure_ex;
+    void *closure_exec;
     Py_ssize_t size;
 
     if (!PyArg_ParseTuple(args, "O!O|OO:callback", &CTypeDescr_Type, &ct, &ob,
@@ -5134,15 +5140,20 @@ static PyObject *b_callback(PyObject *self, PyObject *args)
     if (infotuple == NULL)
         return NULL;
 
-    closure = ffi_closure_alloc(sizeof(ffi_closure), &closure_ex);
+    closure = ffi_closure_alloc(sizeof(ffi_closure), &closure_exec);
+    if (closure == NULL) {
+        Py_DECREF(infotuple);
+        return NULL;
+    }
 
-    cd = PyObject_GC_New(CDataObject, &CDataOwningGC_Type);
+    cd = PyObject_GC_New(CDataObject_closure, &CDataOwningGC_Type);
     if (cd == NULL)
         goto error;
     Py_INCREF(ct);
-    cd->c_type = ct;
-    cd->c_data = (char *)closure;
-    cd->c_weakreflist = NULL;
+    cd->head.c_type = ct;
+    cd->head.c_data = (char *)closure_exec;
+    cd->head.c_weakreflist = NULL;
+    cd->closure = closure;
     PyObject_GC_Track(cd);
 
     cif_descr = (cif_description_t *)ct->ct_extra;
@@ -5153,7 +5164,7 @@ static PyObject *b_callback(PyObject *self, PyObject *args)
         goto error;
     }
     if (ffi_prep_closure_loc(closure, &cif_descr->cif, invoke_callback,
-                             infotuple, closure_ex) != FFI_OK) {
+                             infotuple, closure_exec) != FFI_OK) {
         PyErr_SetString(PyExc_SystemError,
                         "libffi failed to build this callback");
         goto error;
