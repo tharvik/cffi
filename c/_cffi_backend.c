@@ -58,8 +58,6 @@
 # endif
 #endif
 
-#include "malloc_closure.h"
-
 #if PY_MAJOR_VERSION >= 3
 # define STR_OR_BYTES "bytes"
 # define PyText_Type PyUnicode_Type
@@ -1614,7 +1612,7 @@ static void cdataowninggc_dealloc(CDataObject *cd)
         ffi_closure *closure = (ffi_closure *)cd->c_data;
         PyObject *args = (PyObject *)(closure->user_data);
         Py_XDECREF(args);
-        cffi_closure_free(closure);
+        ffi_closure_free(closure);
     }
     else if (cd->c_type->ct_flags & CT_IS_UNSIZED_CHAR_A) {  /* from_buffer */
         Py_buffer *view = ((CDataObject_owngc_frombuf *)cd)->bufferview;
@@ -5091,6 +5089,7 @@ static PyObject *b_callback(PyObject *self, PyObject *args)
     PyObject *py_rawerr, *infotuple = NULL;
     cif_description_t *cif_descr;
     ffi_closure *closure;
+    void *closure_ex;
     Py_ssize_t size;
 
     if (!PyArg_ParseTuple(args, "O!O|OO:callback", &CTypeDescr_Type, &ct, &ob,
@@ -5135,7 +5134,7 @@ static PyObject *b_callback(PyObject *self, PyObject *args)
     if (infotuple == NULL)
         return NULL;
 
-    closure = cffi_closure_alloc();
+    closure = ffi_closure_alloc(sizeof(ffi_closure), &closure_ex);
 
     cd = PyObject_GC_New(CDataObject, &CDataOwningGC_Type);
     if (cd == NULL)
@@ -5153,8 +5152,8 @@ static PyObject *b_callback(PyObject *self, PyObject *args)
                      "return type or with '...'", ct->ct_name);
         goto error;
     }
-    if (ffi_prep_closure(closure, &cif_descr->cif,
-                         invoke_callback, infotuple) != FFI_OK) {
+    if (ffi_prep_closure_loc(closure, &cif_descr->cif, invoke_callback,
+                             infotuple, closure_ex) != FFI_OK) {
         PyErr_SetString(PyExc_SystemError,
                         "libffi failed to build this callback");
         goto error;
@@ -5168,7 +5167,7 @@ static PyObject *b_callback(PyObject *self, PyObject *args)
  error:
     closure->user_data = NULL;
     if (cd == NULL)
-        cffi_closure_free(closure);
+        ffi_closure_free(closure);
     else
         Py_DECREF(cd);
     Py_XDECREF(infotuple);

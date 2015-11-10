@@ -3,63 +3,8 @@
  * and has received some edits.
  */
 
-#include <ffi.h>
-#ifdef MS_WIN32
 #include <windows.h>
-#else
-#include <sys/mman.h>
-#include <unistd.h>
-# if !defined(MAP_ANONYMOUS) && defined(MAP_ANON)
-#  define MAP_ANONYMOUS MAP_ANON
-# endif
-#endif
-
-/* On PaX enable kernels that have MPROTECT enable we can't use PROT_EXEC.
-
-   This is, apparently, an undocumented change to ffi_prep_closure():
-   depending on the Linux kernel we're running on, we must give it a
-   mmap that is either PROT_READ|PROT_WRITE|PROT_EXEC or only
-   PROT_READ|PROT_WRITE.  In the latter case, just trying to obtain a
-   mmap with PROT_READ|PROT_WRITE|PROT_EXEC would kill our process(!),
-   but in that situation libffi is fine with only PROT_READ|PROT_WRITE.
-   There is nothing in the libffi API to know that, though, so we have
-   to guess by parsing /proc/self/status.  "Meh."
- */
-#ifdef __linux__
-#include <stdlib.h>
-
-static int emutramp_enabled = -1;
-
-static int
-emutramp_enabled_check (void)
-{
-    char *buf = NULL;
-    size_t len = 0;
-    FILE *f;
-    int ret;
-    f = fopen ("/proc/self/status", "r");
-    if (f == NULL)
-        return 0;
-    ret = 0;
-
-    while (getline (&buf, &len, f) != -1)
-        if (!strncmp (buf, "PaX:", 4))
-            {
-                char emutramp;
-                if (sscanf (buf, "%*s %*c%c", &emutramp) == 1)
-                    ret = (emutramp == 'E');
-                break;
-            }
-    free (buf);
-    fclose (f);
-    return ret;
-}
-
-#define is_emutramp_enabled() (emutramp_enabled >= 0 ? emutramp_enabled \
-        : (emutramp_enabled = emutramp_enabled_check ()))
-#else
-#define is_emutramp_enabled() 0
-#endif
+#include <ffi.h>
 
 
 /* 'allocate_num_pages' is dynamically adjusted starting from one
@@ -90,24 +35,14 @@ static void more_core(void)
     union mmaped_block *item;
     Py_ssize_t count, i;
 
-/* determine the pagesize */
-#ifdef MS_WIN32
+    /* determine the pagesize */
     if (!_pagesize) {
         SYSTEM_INFO systeminfo;
         GetSystemInfo(&systeminfo);
         _pagesize = systeminfo.dwPageSize;
+        if (_pagesize <= 0)
+            _pagesize = 4096;
     }
-#else
-    if (!_pagesize) {
-#ifdef _SC_PAGESIZE
-        _pagesize = sysconf(_SC_PAGESIZE);
-#else
-        _pagesize = getpagesize();
-#endif
-    }
-#endif
-    if (_pagesize <= 0)
-        _pagesize = 4096;
 
     /* bump 'allocate_num_pages' */
     allocate_num_pages = 1 + (
@@ -117,28 +52,12 @@ static void more_core(void)
     count = (allocate_num_pages * _pagesize) / sizeof(union mmaped_block);
 
     /* allocate a memory block */
-#ifdef MS_WIN32
     item = (union mmaped_block *)VirtualAlloc(NULL,
                                            count * sizeof(union mmaped_block),
                                            MEM_COMMIT,
                                            PAGE_EXECUTE_READWRITE);
     if (item == NULL)
         return;
-#else
-    {
-    int prot = PROT_READ | PROT_WRITE | PROT_EXEC;
-    if (is_emutramp_enabled ())
-        prot &= ~PROT_EXEC;
-    item = (union mmaped_block *)mmap(NULL,
-                        allocate_num_pages * _pagesize,
-                        prot,
-                        MAP_PRIVATE | MAP_ANONYMOUS,
-                        -1,
-                        0);
-    if (item == (void *)MAP_FAILED)
-        return;
-    }
-#endif
 
 #ifdef MALLOC_CLOSURE_DEBUG
     printf("block at %p allocated (%ld bytes), %ld mmaped_blocks\n",
@@ -155,7 +74,7 @@ static void more_core(void)
 /******************************************************************/
 
 /* put the item back into the free list */
-static void cffi_closure_free(ffi_closure *p)
+void ffi_closure_free(void *p)
 {
     union mmaped_block *item = (union mmaped_block *)p;
     item->next = free_list;
@@ -163,14 +82,18 @@ static void cffi_closure_free(ffi_closure *p)
 }
 
 /* return one item from the free list, allocating more if needed */
-static ffi_closure *cffi_closure_alloc(void)
+void *ffi_closure_alloc (size_t size, void **code)
 {
     union mmaped_block *item;
+    void *result;
+    assert(size == sizeof(ffi_closure));
     if (!free_list)
         more_core();
     if (!free_list)
         return NULL;
     item = free_list;
     free_list = item->next;
-    return &item->closure;
+    result = &item->closure;
+    *code = result;
+    return result;
 }
