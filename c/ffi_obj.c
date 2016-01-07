@@ -335,7 +335,7 @@ PyDoc_STRVAR(ffi_new_doc,
 "pointer to the memory somewhere else, e.g. into another structure.");
 
 static PyObject *_ffi_new(FFIObject *self, PyObject *args, PyObject *kwds,
-                          cffi_allocator_t allocator)
+                          const cffi_allocator_t *allocator)
 {
     CTypeDescrObject *ct;
     PyObject *arg, *init = Py_None;
@@ -353,15 +353,22 @@ static PyObject *_ffi_new(FFIObject *self, PyObject *args, PyObject *kwds,
 
 static PyObject *ffi_new(FFIObject *self, PyObject *args, PyObject *kwds)
 {
-    return _ffi_new(self, args, kwds, default_allocator);
+    return _ffi_new(self, args, kwds, &default_allocator);
 }
 
 static PyObject *_ffi_new_with_allocator(PyObject *allocator, PyObject *args,
                                          PyObject *kwds)
 {
+    cffi_allocator_t alloc1;
+    PyObject *my_alloc, *my_free;
+    my_alloc = PyTuple_GET_ITEM(allocator, 1);
+    my_free  = PyTuple_GET_ITEM(allocator, 2);
+    alloc1.ca_alloc = (my_alloc == Py_None ? NULL : my_alloc);
+    alloc1.ca_free  = (my_free  == Py_None ? NULL : my_free);
+    alloc1.ca_dont_clear = (PyTuple_GET_ITEM(allocator, 3) == Py_False);
+
     return _ffi_new((FFIObject *)PyTuple_GET_ITEM(allocator, 0),
-                    args, kwds,
-                    &PyTuple_GET_ITEM(allocator, 1));
+                    args, kwds, &alloc1);
 }
 
 PyDoc_STRVAR(ffi_new_allocator_doc,
@@ -396,26 +403,13 @@ static PyObject *ffi_new_allocator(FFIObject *self, PyObject *args,
         return NULL;
     }
 
-    allocator = PyTuple_New(4);
+    allocator = PyTuple_Pack(4,
+                             (PyObject *)self,
+                             my_alloc,
+                             my_free,
+                             PyBool_FromLong(should_clear_after_alloc));
     if (allocator == NULL)
         return NULL;
-
-    Py_INCREF(self);
-    PyTuple_SET_ITEM(allocator, 0, (PyObject *)self);
-
-    if (my_alloc != Py_None) {
-        Py_INCREF(my_alloc);
-        PyTuple_SET_ITEM(allocator, 1, my_alloc);
-    }
-    if (my_free != Py_None) {
-        Py_INCREF(my_free);
-        PyTuple_SET_ITEM(allocator, 2, my_free);
-    }
-    if (!should_clear_after_alloc) {
-        PyObject *my_true = Py_True;
-        Py_INCREF(my_true);
-        PyTuple_SET_ITEM(allocator, 3, my_true);  /* dont_clear_after_alloc */
-    }
 
     {
         static PyMethodDef md = {"allocator",
@@ -713,6 +707,41 @@ PyDoc_STRVAR(ffi_gc_doc,
 #define ffi_gc  b_gcp     /* ffi_gc() => b_gcp()
                              from _cffi_backend.c */
 
+PyDoc_STRVAR(ffi_def_extern_doc,
+"A decorator.  Attaches the decorated Python function to the C code\n"
+"generated for the 'extern \"Python\"' function of the same name.\n"
+"Calling the C function will then invoke the Python function.\n"
+"\n"
+"Optional arguments: 'name' is the name of the C function, if\n"
+"different from the Python function; and 'error' and 'onerror'\n"
+"handle what occurs if the Python function raises an exception\n"
+"(see the docs for details).");
+
+/* forward; see call_python.c */
+static PyObject *_ffi_def_extern_decorator(PyObject *, PyObject *);
+
+static PyObject *ffi_def_extern(FFIObject *self, PyObject *args,
+                                PyObject *kwds)
+{
+    static PyMethodDef md = {"def_extern_decorator",
+                             (PyCFunction)_ffi_def_extern_decorator, METH_O};
+    PyObject *name = Py_None, *error = Py_None;
+    PyObject *res, *onerror = Py_None;
+    static char *keywords[] = {"name", "error", "onerror", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|OOO", keywords,
+                                     &name, &error, &onerror))
+        return NULL;
+
+    args = Py_BuildValue("(OOOO)", (PyObject *)self, name, error, onerror);
+    if (args == NULL)
+        return NULL;
+
+    res = PyCFunction_New(&md, args);
+    Py_DECREF(args);
+    return res;
+}
+
 PyDoc_STRVAR(ffi_callback_doc,
 "Return a callback object or a decorator making such a callback object.\n"
 "'cdecl' must name a C function pointer type.  The callback invokes the\n"
@@ -861,7 +890,14 @@ typedef void *PyThread_type_lock;
 #endif
 
 PyDoc_STRVAR(ffi_init_once_doc,
-             "XXX document me");
+"init_once(function, tag): run function() once.  More precisely,\n"
+"'function()' is called the first time we see a given 'tag'.\n"
+"\n"
+"The return value of function() is remembered and returned by the current\n"
+"and all future init_once() with the same tag.  If init_once() is called\n"
+"from multiple threads in parallel, all calls block until the execution\n"
+"of function() is done.  If function() raises an exception, it is\n"
+"propagated and nothing is cached.");
 
 #if PY_MAJOR_VERSION < 3
 /* PyCapsule_New is redefined to be PyCObject_FromVoidPtr in _cffi_backend,
@@ -980,6 +1016,7 @@ static PyMethodDef ffi_methods[] = {
  {"addressof",  (PyCFunction)ffi_addressof,  METH_VARARGS, ffi_addressof_doc},
  {"alignof",    (PyCFunction)ffi_alignof,    METH_O,       ffi_alignof_doc},
  {"buffer",     (PyCFunction)ffi_buffer,     METH_VKW,     ffi_buffer_doc},
+ {"def_extern", (PyCFunction)ffi_def_extern, METH_VKW,     ffi_def_extern_doc},
  {"callback",   (PyCFunction)ffi_callback,   METH_VKW,     ffi_callback_doc},
  {"cast",       (PyCFunction)ffi_cast,       METH_VARARGS, ffi_cast_doc},
  {"dlclose",    (PyCFunction)ffi_dlclose,    METH_VARARGS, ffi_dlclose_doc},

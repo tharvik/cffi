@@ -364,6 +364,16 @@ static PyObject *lib_build_and_cache_attr(LibObject *lib, PyObject *name,
         break;
     }
 
+    case _CFFI_OP_EXTERN_PYTHON:
+        /* for reading 'lib.bar' where bar is declared with extern "Python" */
+        ct = realize_c_type(types_builder, types_builder->ctx.types,
+                            _CFFI_GETARG(g->type_op));
+        if (ct == NULL)
+            return NULL;
+        x = convert_to_object((char *)&g->size_or_direct_fn, ct);
+        Py_DECREF(ct);
+        break;
+
     default:
         PyErr_Format(PyExc_NotImplementedError, "in lib_build_attr: op=%d",
                      (int)_CFFI_GETOP(g->type_op));
@@ -449,6 +459,7 @@ static PyObject *_lib_dict(LibObject *lib)
 
 static PyObject *lib_getattr(LibObject *lib, PyObject *name)
 {
+    char *p;
     PyObject *x;
     LIB_GET_OR_CACHE_ADDR(x, lib, name, goto missing);
 
@@ -459,16 +470,25 @@ static PyObject *lib_getattr(LibObject *lib, PyObject *name)
     return x;
 
  missing:
-    if (strcmp(PyText_AsUTF8(name), "__all__") == 0) {
+    p = PyText_AsUTF8(name);
+    if (p == NULL)
+        return NULL;
+    if (strcmp(p, "__all__") == 0) {
         PyErr_Clear();
         return _lib_dir1(lib, 1);
     }
-    if (strcmp(PyText_AsUTF8(name), "__dict__") == 0) {
+    if (strcmp(p, "__dict__") == 0) {
         PyErr_Clear();
         return _lib_dict(lib);
     }
+    if (strcmp(p, "__class__") == 0) {
+        PyErr_Clear();
+        x = (PyObject *)Py_TYPE(lib);
+        Py_INCREF(x);
+        return x;
+    }
     /* this hack is for Python 3.5 */
-    if (strcmp(PyText_AsUTF8(name), "__name__") == 0) {
+    if (strcmp(p, "__name__") == 0) {
         PyErr_Clear();
         return lib_repr(lib);
     }

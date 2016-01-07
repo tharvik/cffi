@@ -266,18 +266,7 @@ typedef struct {
 /* whenever running Python code, the errno is saved in this thread-local
    variable */
 #ifndef MS_WIN32
-# ifdef USE__THREAD
-/* This macro ^^^ is defined by setup.py if it finds that it is
-   syntactically valid to use "__thread" with this C compiler. */
-static __thread int cffi_saved_errno = 0;
-static void save_errno(void) { cffi_saved_errno = errno; }
-static void restore_errno(void) { errno = cffi_saved_errno; }
-static void init_errno(void) { }
-# else
-#  include "misc_thread.h"
-# endif
-# define save_errno_only      save_errno
-# define restore_errno_only   restore_errno
+# include "misc_thread_posix.h"
 #endif
 
 #include "minibuffer.h"
@@ -290,8 +279,11 @@ static void init_errno(void) { }
 # include "wchar_helper.h"
 #endif
 
-typedef PyObject *const cffi_allocator_t[3];
-static cffi_allocator_t default_allocator = { NULL, NULL, NULL };
+typedef struct _cffi_allocator_s {
+    PyObject *ca_alloc, *ca_free;
+    int ca_dont_clear;
+} cffi_allocator_t;
+static const cffi_allocator_t default_allocator = { NULL, NULL, 0 };
 static PyObject *FFIError;
 static PyObject *unique_cache;
 
@@ -3030,21 +3022,18 @@ static CDataObject *allocate_gcp_object(CDataObject *origobj,
 static CDataObject *allocate_with_allocator(Py_ssize_t basesize,
                                             Py_ssize_t datasize,
                                             CTypeDescrObject *ct,
-                                            cffi_allocator_t allocator)
+                                            const cffi_allocator_t *allocator)
 {
     CDataObject *cd;
-    PyObject *my_alloc = allocator[0];
-    PyObject *my_free = allocator[1];
-    PyObject *dont_clear_after_alloc = allocator[2];
 
-    if (my_alloc == NULL) {   /* alloc */
+    if (allocator->ca_alloc == NULL) {
         cd = allocate_owning_object(basesize + datasize, ct);
         if (cd == NULL)
             return NULL;
         cd->c_data = ((char *)cd) + basesize;
     }
     else {
-        PyObject *res = PyObject_CallFunction(my_alloc, "n", datasize);
+        PyObject *res = PyObject_CallFunction(allocator->ca_alloc, "n", datasize);
         if (res == NULL)
             return NULL;
 
@@ -3069,16 +3058,16 @@ static CDataObject *allocate_with_allocator(Py_ssize_t basesize,
             return NULL;
         }
 
-        cd = allocate_gcp_object(cd, ct, my_free);
+        cd = allocate_gcp_object(cd, ct, allocator->ca_free);
         Py_DECREF(res);
     }
-    if (dont_clear_after_alloc == NULL)
+    if (!allocator->ca_dont_clear)
         memset(cd->c_data, 0, datasize);
     return cd;
 }
 
 static PyObject *direct_newp(CTypeDescrObject *ct, PyObject *init,
-                             cffi_allocator_t allocator)
+                             const cffi_allocator_t *allocator)
 {
     CTypeDescrObject *ctitem;
     CDataObject *cd;
@@ -3183,7 +3172,7 @@ static PyObject *b_newp(PyObject *self, PyObject *args)
     PyObject *init = Py_None;
     if (!PyArg_ParseTuple(args, "O!|O:newp", &CTypeDescr_Type, &ct, &init))
         return NULL;
-    return direct_newp(ct, init, default_allocator);
+    return direct_newp(ct, init, &default_allocator);
 }
 
 static int
@@ -4659,7 +4648,9 @@ static int fb_build(struct funcbuilder_s *fb, PyObject *fargs,
 
     if (cif_descr != NULL) {
         /* exchange data size */
-        cif_descr->exchange_size = exchange_offset;
+        /* we also align it to the next multiple of 8, in an attempt to
+           work around bugs(?) of libffi like #241 */
+        cif_descr->exchange_size = ALIGN_ARG(exchange_offset);
     }
     return 0;
 }
@@ -4908,7 +4899,8 @@ static PyObject *b_new_function_type(PyObject *self, PyObject *args)
 
 static int convert_from_object_fficallback(char *result,
                                            CTypeDescrObject *ctype,
-                                           PyObject *pyobj)
+                                           PyObject *pyobj,
+                                           int encode_result_for_libffi)
 {
     /* work work work around a libffi irregularity: for integer return
        types we have to fill at least a complete 'ffi_arg'-sized result
@@ -4924,6 +4916,8 @@ static int convert_from_object_fficallback(char *result,
                 return -1;
             }
         }
+        if (!encode_result_for_libffi)
+            goto skip;
         if (ctype->ct_flags & CT_PRIMITIVE_SIGNED) {
             PY_LONG_LONG value;
             /* It's probably fine to always zero-extend, but you never
@@ -4954,6 +4948,7 @@ static int convert_from_object_fficallback(char *result,
 #endif
         }
     }
+ skip:
     return convert_from_object(result, ctype, pyobj);
 }
 
@@ -4988,14 +4983,9 @@ static void _my_PyErr_WriteUnraisable(char *objdescr, PyObject *obj,
     Py_XDECREF(tb);
 }
 
-static void invoke_callback(ffi_cif *cif, void *result, void **args,
-                            void *userdata)
+static void general_invoke_callback(int decode_args_from_libffi,
+                                    void *result, char *args, void *userdata)
 {
-    save_errno();
-    {
-#ifdef WITH_THREAD
-    PyGILState_STATE state = PyGILState_Ensure();
-#endif
     PyObject *cb_args = (PyObject *)userdata;
     CTypeDescrObject *ct = (CTypeDescrObject *)PyTuple_GET_ITEM(cb_args, 0);
     PyObject *signature = ct->ct_stuff;
@@ -5017,7 +5007,19 @@ static void invoke_callback(ffi_cif *cif, void *result, void **args,
         goto error;
 
     for (i=0; i<n; i++) {
-        PyObject *a = convert_to_object(args[i], SIGNATURE(2 + i));
+        char *a_src;
+        PyObject *a;
+        CTypeDescrObject *a_ct = SIGNATURE(2 + i);
+
+        if (decode_args_from_libffi) {
+            a_src = ((void **)args)[i];
+        }
+        else {
+            a_src = args + i * 8;
+            if (a_ct->ct_flags & (CT_IS_LONGDOUBLE | CT_STRUCT | CT_UNION))
+                a_src = *(char **)a_src;
+        }
+        a = convert_to_object(a_src, a_ct);
         if (a == NULL)
             goto error;
         PyTuple_SET_ITEM(py_args, i, a);
@@ -5026,7 +5028,8 @@ static void invoke_callback(ffi_cif *cif, void *result, void **args,
     py_res = PyObject_Call(py_ob, py_args, NULL);
     if (py_res == NULL)
         goto error;
-    if (convert_from_object_fficallback(result, SIGNATURE(1), py_res) < 0) {
+    if (convert_from_object_fficallback(result, SIGNATURE(1), py_res,
+                                        decode_args_from_libffi) < 0) {
         extra_error_line = "Trying to convert the result back to C:\n";
         goto error;
     }
@@ -5034,10 +5037,6 @@ static void invoke_callback(ffi_cif *cif, void *result, void **args,
     Py_XDECREF(py_args);
     Py_XDECREF(py_res);
     Py_DECREF(cb_args);
-#ifdef WITH_THREAD
-    PyGILState_Release(state);
-#endif
-    restore_errno();
     return;
 
  error:
@@ -5062,7 +5061,8 @@ static void invoke_callback(ffi_cif *cif, void *result, void **args,
                                             NULL);
         if (res1 != NULL) {
             if (res1 != Py_None)
-                convert_from_object_fficallback(result, SIGNATURE(1), res1);
+                convert_from_object_fficallback(result, SIGNATURE(1), res1,
+                                                decode_args_from_libffi);
             Py_DECREF(res1);
         }
         if (!PyErr_Occurred()) {
@@ -5083,24 +5083,31 @@ static void invoke_callback(ffi_cif *cif, void *result, void **args,
         }
     }
     goto done;
-    }
 
 #undef SIGNATURE
 }
 
-static PyObject *b_callback(PyObject *self, PyObject *args)
+static void invoke_callback(ffi_cif *cif, void *result, void **args,
+                            void *userdata)
 {
-    CTypeDescrObject *ct, *ctresult;
-    CDataObject *cd;
-    PyObject *ob, *error_ob = Py_None, *onerror_ob = Py_None;
-    PyObject *py_rawerr, *infotuple = NULL;
-    cif_description_t *cif_descr;
-    ffi_closure *closure;
-    Py_ssize_t size;
+    save_errno();
+    {
+        PyGILState_STATE state = gil_ensure();
+        general_invoke_callback(1, result, (char *)args, userdata);
+        gil_release(state);
+    }
+    restore_errno();
+}
 
-    if (!PyArg_ParseTuple(args, "O!O|OO:callback", &CTypeDescr_Type, &ct, &ob,
-                          &error_ob, &onerror_ob))
-        return NULL;
+static PyObject *prepare_callback_info_tuple(CTypeDescrObject *ct,
+                                             PyObject *ob,
+                                             PyObject *error_ob,
+                                             PyObject *onerror_ob,
+                                             int decode_args_from_libffi)
+{
+    CTypeDescrObject *ctresult;
+    PyObject *py_rawerr, *infotuple;
+    Py_ssize_t size;
 
     if (!(ct->ct_flags & CT_FUNCTIONPTR)) {
         PyErr_Format(PyExc_TypeError, "expected a function ctype, got '%s'",
@@ -5130,13 +5137,38 @@ static PyObject *b_callback(PyObject *self, PyObject *args)
     memset(PyBytes_AS_STRING(py_rawerr), 0, size);
     if (error_ob != Py_None) {
         if (convert_from_object_fficallback(
-                PyBytes_AS_STRING(py_rawerr), ctresult, error_ob) < 0) {
+                PyBytes_AS_STRING(py_rawerr), ctresult, error_ob,
+                decode_args_from_libffi) < 0) {
             Py_DECREF(py_rawerr);
             return NULL;
         }
     }
     infotuple = Py_BuildValue("OOOO", ct, ob, py_rawerr, onerror_ob);
     Py_DECREF(py_rawerr);
+
+#ifdef WITH_THREAD
+    /* We must setup the GIL here, in case the callback is invoked in
+       some other non-Pythonic thread.  This is the same as ctypes. */
+    PyEval_InitThreads();
+#endif
+
+    return infotuple;
+}
+
+static PyObject *b_callback(PyObject *self, PyObject *args)
+{
+    CTypeDescrObject *ct;
+    CDataObject *cd;
+    PyObject *ob, *error_ob = Py_None, *onerror_ob = Py_None;
+    PyObject *infotuple;
+    cif_description_t *cif_descr;
+    ffi_closure *closure;
+
+    if (!PyArg_ParseTuple(args, "O!O|OO:callback", &CTypeDescr_Type, &ct, &ob,
+                          &error_ob, &onerror_ob))
+        return NULL;
+
+    infotuple = prepare_callback_info_tuple(ct, ob, error_ob, onerror_ob, 1);
     if (infotuple == NULL)
         return NULL;
 
@@ -5165,9 +5197,6 @@ static PyObject *b_callback(PyObject *self, PyObject *args)
         goto error;
     }
     assert(closure->user_data == infotuple);
-#ifdef WITH_THREAD
-    PyEval_InitThreads();
-#endif
     return (PyObject *)cd;
 
  error:
@@ -5778,6 +5807,10 @@ static PyObject *direct_from_buffer(CTypeDescrObject *ct, PyObject *x)
     }
 
     view = PyObject_Malloc(sizeof(Py_buffer));
+    if (view == NULL) {
+        PyErr_NoMemory();
+        return NULL;
+    }
     if (_my_PyObject_GetContiguousBuffer(x, view, 0) < 0)
         goto error1;
 
@@ -6318,6 +6351,9 @@ static PyObject *_cffi_from_c_wchar_t(wchar_t x) {
 }
 #endif
 
+struct _cffi_externpy_s;      /* forward declaration */
+static void _cffi_call_python(struct _cffi_externpy_s *, char *args);
+
 static void *cffi_exports[] = {
     NULL,
     _cffi_to_c_i8,
@@ -6349,6 +6385,7 @@ static void *cffi_exports[] = {
     _cffi_to_c__Bool,
     _prepare_pointer_call_argument,
     convert_array_from_object,
+    _cffi_call_python,
 };
 
 static struct { const char *name; int value; } all_dlopen_flags[] = {
@@ -6463,7 +6500,7 @@ init_cffi_backend(void)
     if (v == NULL || PyModule_AddObject(m, "_C_API", v) < 0)
         INITERROR;
 
-    v = PyText_FromString("1.3.1");
+    v = PyText_FromString("1.4.2");
     if (v == NULL || PyModule_AddObject(m, "__version__", v) < 0)
         INITERROR;
 
@@ -6490,7 +6527,7 @@ init_cffi_backend(void)
             INITERROR;
     }
 
-    init_errno();
+    init_cffi_tls();
     if (PyErr_Occurred())
         INITERROR;
 
