@@ -6352,7 +6352,7 @@ static PyObject *_cffi_from_c_wchar_t(wchar_t x) {
 #endif
 
 struct _cffi_externpy_s;      /* forward declaration */
-static void _cffi_call_python(struct _cffi_externpy_s *, char *args);
+static void cffi_call_python(struct _cffi_externpy_s *, char *args);
 
 static void *cffi_exports[] = {
     NULL,
@@ -6385,7 +6385,7 @@ static void *cffi_exports[] = {
     _cffi_to_c__Bool,
     _prepare_pointer_call_argument,
     convert_array_from_object,
-    _cffi_call_python,
+    cffi_call_python,
 };
 
 static struct { const char *name; int value; } all_dlopen_flags[] = {
@@ -6500,7 +6500,7 @@ init_cffi_backend(void)
     if (v == NULL || PyModule_AddObject(m, "_C_API", v) < 0)
         INITERROR;
 
-    v = PyText_FromString("1.4.2");
+    v = PyText_FromString("1.4.3");
     if (v == NULL || PyModule_AddObject(m, "__version__", v) < 0)
         INITERROR;
 

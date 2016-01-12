@@ -74,6 +74,7 @@ class FFI(object):
         self._windows_unicode = None
         self._init_once_cache = {}
         self._cdef_version = None
+        self._embedding = None
         if hasattr(backend, 'set_ffi'):
             backend.set_ffi(self)
         for name in backend.__dict__:
@@ -101,13 +102,21 @@ class FFI(object):
         If 'packed' is specified as True, all structs declared inside this
         cdef are packed, i.e. laid out without any field alignment at all.
         """
+        self._cdef(csource, override=override, packed=packed)
+
+    def embedding_api(self, csource, packed=False):
+        self._cdef(csource, packed=packed, dllexport=True)
+        if self._embedding is None:
+            self._embedding = ''
+
+    def _cdef(self, csource, override=False, **options):
         if not isinstance(csource, str):    # unicode, on Python 2
             if not isinstance(csource, basestring):
                 raise TypeError("cdef() argument must be a string")
             csource = csource.encode('ascii')
         with self._lock:
             self._cdef_version = object()
-            self._parser.parse(csource, override=override, packed=packed)
+            self._parser.parse(csource, override=override, **options)
             self._cdefsources.append(csource)
             if override:
                 for cache in self._function_caches:
@@ -533,6 +542,25 @@ class FFI(object):
                                        ('_UNICODE', '1')]
         kwds['define_macros'] = defmacros
 
+    def _apply_embedding_fix(self, kwds):
+        # must include an argument like "-lpython2.7" for the compiler
+        if '__pypy__' in sys.builtin_module_names:
+            pythonlib = "pypy-c"
+        else:
+            if sys.platform == "win32":
+                template = "python%d%d"
+                if sys.flags.debug:
+                    template = template + '_d'
+            else:
+                template = "python%d.%d"
+            pythonlib = (template %
+                    (sys.hexversion >> 24, (sys.hexversion >> 16) & 0xff))
+            if hasattr(sys, 'abiflags'):
+                pythonlib += sys.abiflags
+        libraries = kwds.get('libraries', [])
+        if pythonlib not in libraries:
+            kwds['libraries'] = libraries + [pythonlib]
+
     def set_source(self, module_name, source, source_extension='.c', **kwds):
         if hasattr(self, '_assigned_source'):
             raise ValueError("set_source() cannot be called several times "
@@ -592,13 +620,25 @@ class FFI(object):
         recompile(self, module_name, source,
                   c_file=filename, call_c_compiler=False, **kwds)
 
-    def compile(self, tmpdir='.', verbose=0):
+    def compile(self, tmpdir='.', verbose=0, ext=None):
+        """Values recognized for the ext parameter:
+
+           - 'capi': use distutils' default to build CPython C API extensions
+           - 'system': use the system's default for dynamic libraries (.so/.dll)
+           - '.FOO': exactly .FOO
+
+           The default is 'capi' when building a non-embedded C API extension,
+           and 'system' when building an embedded library.
+        """
         from .recompiler import recompile
         #
         if not hasattr(self, '_assigned_source'):
             raise ValueError("set_source() must be called before compile()")
+        if ext not in (None, 'capi', 'system') and '.' not in ext:
+            raise ValueError("bad value for 'ext' argument: %r" % (ext,))
         module_name, source, source_extension, kwds = self._assigned_source
         return recompile(self, module_name, source, tmpdir=tmpdir,
+                         target_extention=ext,
                          source_extension=source_extension,
                          compiler_verbose=verbose, **kwds)
 
@@ -625,6 +665,32 @@ class FFI(object):
             result = func()
             self._init_once_cache[tag] = (True, result)
         return result
+
+    def embedding_init_code(self, pysource):
+        if self._embedding:
+            raise ValueError("embedding_init_code() can only be called once")
+        # fix 'pysource' before it gets dumped into the C file:
+        # - remove empty lines at the beginning, so it starts at "line 1"
+        # - dedent, if all non-empty lines are indented
+        # - check for SyntaxErrors
+        import re
+        match = re.match(r'\s*\n', pysource)
+        if match:
+            pysource = pysource[match.end():]
+        lines = pysource.splitlines() or ['']
+        prefix = re.match(r'\s*', lines[0]).group()
+        for i in range(1, len(lines)):
+            line = lines[i]
+            if line.rstrip():
+                while not line.startswith(prefix):
+                    prefix = prefix[:-1]
+        i = len(prefix)
+        lines = [line[i:]+'\n' for line in lines]
+        pysource = ''.join(lines)
+        #
+        compile(pysource, "cffi_init", "exec")
+        #
+        self._embedding = pysource
 
 
 def _load_backend_lib(backend, name, flags):
